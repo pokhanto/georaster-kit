@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 elevation-types = { path = "../elevation-types" }
+thiserror = "2.0.18"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
