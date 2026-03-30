@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package elevation_service;
+
+message Point {
+  double lat = 1;
+  double lon = 2;
+}
+
+message LineStringElevationRequest {
+  repeated Point points = 1;
+}
+
+message LineStringElevationResponse {
+  Point point = 1;
+  optional double elevation = 2;
+}
+
+service Elevation {
+  rpc LineStringElevationStreaming(LineStringElevationRequest) returns (stream LineStringElevationResponse) {}
+}
