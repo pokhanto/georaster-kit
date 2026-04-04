@@ -1,11 +1,11 @@
-use std::{
-    fs::{File, OpenOptions},
-    io::BufWriter,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use elevation_types::{DatasetMetadata, MetadataStorage, MetadataStorageError};
 use serde::{Deserialize, Serialize};
+use tokio::{
+    fs::{self, File, OpenOptions},
+    io::{AsyncReadExt, AsyncWriteExt},
+};
 
 pub struct FsMetadataStorage {
     base_dir: PathBuf,
@@ -26,41 +26,60 @@ const METADATA_FILE_NAME: &str = "registry.json";
 
 impl MetadataStorage for FsMetadataStorage {
     #[tracing::instrument(skip(self), fields(base_dir = %self.base_dir.display()))]
-    fn save_metadata(&self, metadata_to_save: DatasetMetadata) -> Result<(), MetadataStorageError> {
-        std::fs::create_dir_all(&self.base_dir).map_err(|err| {
-            tracing::debug!(error = %err, base_dir = %self.base_dir.display(), "failed to create metadata storage directory");
-
+    async fn save_metadata(
+        &self,
+        metadata_to_save: DatasetMetadata,
+    ) -> Result<(), MetadataStorageError> {
+        fs::create_dir_all(&self.base_dir).await.map_err(|err| {
+            tracing::debug!(
+                error = %err,
+                base_dir = %self.base_dir.display(),
+                "failed to create metadata storage directory"
+            );
             MetadataStorageError::PrepareStorage
         })?;
 
-        let metadata_file = OpenOptions::new()
+        let metadata_path = Path::new(&self.base_dir).join(METADATA_FILE_NAME);
+
+        let mut metadata_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(Path::new(&self.base_dir).join(METADATA_FILE_NAME))
+            .open(&metadata_path)
+            .await
             .map_err(|err| {
                 tracing::debug!(
                     error = %err,
-                    base_dir = %self.base_dir.display(),
-                    file_name = %METADATA_FILE_NAME,
+                    path = %metadata_path.display(),
                     "failed to open metadata file"
                 );
                 MetadataStorageError::PrepareStorage
             })?;
 
-        let mut registry: FsMetadataRegistry = match serde_json::from_reader(&metadata_file) {
-            Ok(registry) => registry,
-            // if file just created - create empty registry
-            Err(err) if err.is_eof() => FsMetadataRegistry { metadata: vec![] },
-            Err(err) => {
+        let mut buf = Vec::new();
+        metadata_file.read_to_end(&mut buf).await.map_err(|err| {
+            tracing::debug!(
+                error = %err,
+                path = %metadata_path.display(),
+                "failed to read metadata file"
+            );
+            MetadataStorageError::PrepareStorage
+        })?;
+
+        let mut registry: FsMetadataRegistry = if buf.is_empty() {
+            FsMetadataRegistry { metadata: vec![] }
+        } else {
+            serde_json::from_slice(&buf).map_err(|err| {
                 tracing::debug!(
                     error = %err,
+                    path = %metadata_path.display(),
                     "failed to deserialize metadata registry"
                 );
-                return Err(MetadataStorageError::PrepareStorage);
-            }
+                MetadataStorageError::PrepareStorage
+            })?
         };
+
         tracing::debug!(registry = ?registry, "registry resolved");
 
         if registry
@@ -70,29 +89,46 @@ impl MetadataStorage for FsMetadataStorage {
         {
             return Err(MetadataStorageError::DuplicateId);
         }
+
         registry.metadata.push(metadata_to_save);
 
-        let metadata_file = OpenOptions::new()
+        let serialized = serde_json::to_vec_pretty(&registry).map_err(|err| {
+            tracing::debug!(
+                error = %err,
+                path = %metadata_path.display(),
+                "failed to serialize metadata registry"
+            );
+            MetadataStorageError::Save
+        })?;
+
+        let mut metadata_file = OpenOptions::new()
             .write(true)
             .truncate(true)
-            .open(Path::new(&self.base_dir).join(METADATA_FILE_NAME))
+            .open(&metadata_path)
+            .await
             .map_err(|err| {
                 tracing::debug!(
                     error = %err,
-                    base_dir = %self.base_dir.display(),
-                    file_name = %METADATA_FILE_NAME,
-                    "failed to open metadata file to write metadata"
+                    path = %metadata_path.display(),
+                    "failed to open metadata file for writing"
                 );
                 MetadataStorageError::PrepareStorage
             })?;
 
-        let writer = BufWriter::new(&metadata_file);
-        serde_json::to_writer_pretty(writer, &registry).map_err(|err| {
+        metadata_file.write_all(&serialized).await.map_err(|err| {
             tracing::debug!(
                 error = %err,
-                base_dir = %self.base_dir.display(),
-                file_name = %METADATA_FILE_NAME,
-                "failed to save metadata file"
+                path = %metadata_path.display(),
+                "failed to write metadata file"
+            );
+            MetadataStorageError::Save
+        })?;
+
+        metadata_file.flush().await.map_err(|err| {
+            tracing::debug!(
+                error = %err,
+                path = %metadata_path.display(),
+                "failed to flush metadata file"
             );
             MetadataStorageError::Save
         })?;
@@ -101,10 +137,10 @@ impl MetadataStorage for FsMetadataStorage {
     }
 
     #[tracing::instrument(skip(self), fields(base_dir = %self.base_dir.display()))]
-    fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError> {
+    async fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError> {
         let metadata_path = Path::new(&self.base_dir).join(METADATA_FILE_NAME);
 
-        let metadata_file = File::open(&metadata_path).map_err(|err| {
+        let mut metadata_file = File::open(&metadata_path).await.map_err(|err| {
             tracing::debug!(
                 error = %err,
                 path = %metadata_path.display(),
@@ -113,15 +149,24 @@ impl MetadataStorage for FsMetadataStorage {
             MetadataStorageError::Load
         })?;
 
-        let registry: FsMetadataRegistry =
-            serde_json::from_reader(metadata_file).map_err(|err| {
-                tracing::debug!(
-                    error = %err,
-                    path = %metadata_path.display(),
-                    "failed to deserialize metadata file"
-                );
-                MetadataStorageError::Load
-            })?;
+        let mut buf = Vec::new();
+        metadata_file.read_to_end(&mut buf).await.map_err(|err| {
+            tracing::debug!(
+                error = %err,
+                path = %metadata_path.display(),
+                "failed to read metadata file"
+            );
+            MetadataStorageError::Load
+        })?;
+
+        let registry: FsMetadataRegistry = serde_json::from_slice(&buf).map_err(|err| {
+            tracing::debug!(
+                error = %err,
+                path = %metadata_path.display(),
+                "failed to deserialize metadata file"
+            );
+            MetadataStorageError::Load
+        })?;
 
         Ok(registry.metadata)
     }

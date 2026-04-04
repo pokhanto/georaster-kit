@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-//TODO: reorganize types to separate modules
+//TODO: reorganize to separate modules
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Elevation(pub f64);
 
@@ -25,8 +25,13 @@ pub enum MetadataStorageError {
 }
 
 pub trait MetadataStorage {
-    fn save_metadata(&self, metadata: DatasetMetadata) -> Result<(), MetadataStorageError>;
-    fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError>;
+    fn save_metadata(
+        &self,
+        metadata: DatasetMetadata,
+    ) -> impl Future<Output = Result<(), MetadataStorageError>> + Send;
+    fn load_metadata(
+        &self,
+    ) -> impl Future<Output = Result<Vec<DatasetMetadata>, MetadataStorageError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,7 +48,7 @@ pub trait ArtifactStorage {
         &self,
         dataset_id: &str,
         source_path: &Path,
-    ) -> Result<ArtifactLocator, ArtifactStorageError>;
+    ) -> impl Future<Output = Result<ArtifactLocator, ArtifactStorageError>> + Send;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -233,7 +238,7 @@ pub trait RasterReader<T> {
         &self,
         locator: &ArtifactLocator,
         raster_window: RasterReadWindow,
-    ) -> Result<RasterWindowData<T>, RasterReaderError>;
+    ) -> impl Future<Output = Result<RasterWindowData<T>, RasterReaderError>> + Send;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

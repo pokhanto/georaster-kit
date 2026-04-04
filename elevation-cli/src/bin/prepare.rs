@@ -14,7 +14,8 @@ struct Args {
     base_dir: PathBuf,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let subscriber = FmtSubscriber::builder()
         .with_max_level(tracing::Level::DEBUG)
         .finish();
@@ -28,5 +29,7 @@ fn main() {
     let metadata_storage = FsMetadataStorage::new(base_dir.to_owned());
     let artifact_storage = FsArtifactStorage::new(base_dir);
 
-    ingest(dataset_id, source, artifact_storage, metadata_storage).expect("ingest failed");
+    ingest(dataset_id, source, artifact_storage, metadata_storage)
+        .await
+        .expect("ingest failed");
 }

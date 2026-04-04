@@ -80,13 +80,13 @@ where
     /// }
     /// ```
     #[tracing::instrument(skip(self), fields(lon, lat))]
-    pub fn elevation_at_point(
+    pub async fn elevation_at_point(
         &self,
         lon: f64,
         lat: f64,
     ) -> Result<Option<Elevation>, ElevationServiceError> {
         tracing::info!(lon, lat, "starting getting elevation at point");
-        let datasets = self.metadata.load_metadata().map_err(|err| {
+        let datasets = self.metadata.load_metadata().await.map_err(|err| {
             tracing::error!(
                 error = %err,
                 lon = lon,
@@ -119,6 +119,7 @@ where
                 &dataset.artifact_path,
                 RasterReadWindow::new_point(pixel_placement),
             )
+            .await
             .map_err(|err| {
                 tracing::error!(
                     error = %err,
@@ -211,13 +212,13 @@ where
     /// assert!(elevations.height > 0);
     /// ```
     #[tracing::instrument(skip(self), fields(bbox, resolution))]
-    pub fn elevations_in_bbox(
+    pub async fn elevations_in_bbox(
         &self,
         bbox: Bounds,
         resolution_hint: Option<ResolutionHint>,
     ) -> Result<BboxElevations, ElevationServiceError> {
         tracing::info!(bbox = ?bbox, resolution_hint = ?resolution_hint, "starting getting elevations in bbox with resolution");
-        let datasets = self.metadata.load_metadata().map_err(|err| {
+        let datasets = self.metadata.load_metadata().await.map_err(|err| {
             tracing::error!(
                 error = %err,
                 bbox = ?bbox,
@@ -314,6 +315,7 @@ where
             let raster_data = self
                 .raster
                 .read_window(&dataset.artifact_path, raster_read_window)
+                .await
                 .map_err(|err| {
                     tracing::error!(
                         error = %err,
@@ -523,7 +525,7 @@ fn create_raster_processing_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::RefCell, rc::Rc};
+    use std::sync::{Arc, Mutex};
 
     use elevation_types::{
         ArtifactLocator, BlockSize, Bounds, Crs, DatasetMetadata, MetadataStorage,
@@ -538,7 +540,7 @@ mod tests {
     }
 
     impl MetadataStorage for FakeMetadataStorage {
-        fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError> {
+        async fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError> {
             if self.should_fail {
                 return Err(MetadataStorageError::Other("metadata error".into()));
             }
@@ -546,7 +548,7 @@ mod tests {
             Ok(self.datasets.clone())
         }
 
-        fn save_metadata(
+        async fn save_metadata(
             &self,
             _metadata: DatasetMetadata,
         ) -> Result<(), elevation_types::MetadataStorageError> {
@@ -566,25 +568,26 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct FakeRasterReader {
-        reads: Rc<RefCell<Vec<(String, RasterReadWindow)>>>,
+        reads: Arc<Mutex<Vec<(String, RasterReadWindow)>>>,
         responses: Vec<FakeRasterReaderData>,
         should_fail: bool,
     }
 
     impl FakeRasterReader {
         fn recorded_reads(&self) -> Vec<(String, RasterReadWindow)> {
-            self.reads.borrow().clone()
+            self.reads.lock().unwrap().clone()
         }
     }
 
     impl RasterReader<f64> for FakeRasterReader {
-        fn read_window(
+        async fn read_window(
             &self,
             artifact_path: &ArtifactLocator,
             window: RasterReadWindow,
         ) -> Result<RasterWindowData<f64>, RasterReaderError> {
             self.reads
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .push((artifact_path.to_string(), window));
 
             if self.should_fail {
@@ -653,8 +656,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn elevations_in_bbox_returns_empty_grid_when_no_dataset_intersects() {
+    #[tokio::test]
+    async fn elevations_in_bbox_returns_empty_grid_when_no_dataset_intersects() {
         let requested_bbox = bbox(0.0, 0.0, 2.0, 2.0);
 
         let metadata = FakeMetadataStorage {
@@ -680,6 +683,7 @@ mod tests {
                     lat_resolution: 1.0,
                 }),
             )
+            .await
             .unwrap();
 
         assert_eq!(result.bbox, requested_bbox);
@@ -689,8 +693,8 @@ mod tests {
         assert!(raster.recorded_reads().is_empty());
     }
 
-    #[test]
-    fn elevations_in_bbox_returns_values_from_single_covering_dataset() {
+    #[tokio::test]
+    async fn elevations_in_bbox_returns_values_from_single_covering_dataset() {
         let requested_bbox = bbox(0.0, 0.0, 2.0, 2.0);
 
         let metadata = FakeMetadataStorage {
@@ -720,6 +724,7 @@ mod tests {
                     lat_resolution: 1.0,
                 }),
             )
+            .await
             .unwrap();
 
         assert_eq!(result.bbox, requested_bbox);
@@ -740,8 +745,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elevations_in_bbox_merges_disjoint_dataset_contributions() {
+    #[tokio::test]
+    async fn elevations_in_bbox_merges_disjoint_dataset_contributions() {
         let requested_bbox = bbox(0.0, 0.0, 4.0, 2.0);
 
         let left = dataset(
@@ -799,6 +804,7 @@ mod tests {
                     lat_resolution: 1.0,
                 }),
             )
+            .await
             .unwrap();
 
         assert_eq!(result.width, 4);
@@ -818,8 +824,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elevations_in_bbox_overwrites_lower_quality_with_higher_quality_dataset() {
+    #[tokio::test]
+    async fn elevations_in_bbox_overwrites_lower_quality_with_higher_quality_dataset() {
         let requested_bbox = bbox(0.0, 0.0, 2.0, 2.0);
 
         let low_quality = dataset("low", "low.tif", requested_bbox, 1.0, -1.0, None);
@@ -870,6 +876,7 @@ mod tests {
                     lat_resolution: 1.0,
                 }),
             )
+            .await
             .unwrap();
 
         assert_eq!(result.width, 2);
@@ -885,8 +892,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elevations_in_bbox_does_not_overwrite_real_value_with_nodata() {
+    #[tokio::test]
+    async fn elevations_in_bbox_does_not_overwrite_real_value_with_nodata() {
         let requested_bbox = bbox(0.0, 0.0, 2.0, 2.0);
 
         let low_quality = dataset("low", "low.tif", requested_bbox, 1.0, -1.0, None);
@@ -937,6 +944,7 @@ mod tests {
                     lat_resolution: 1.0,
                 }),
             )
+            .await
             .unwrap();
 
         assert_eq!(result.width, 2);
@@ -952,8 +960,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elevations_in_bbox_uses_highest_resolution_hint() {
+    #[tokio::test]
+    async fn elevations_in_bbox_uses_highest_resolution_hint() {
         let requested_bbox = bbox(0.0, 0.0, 4.0, 4.0);
 
         let low = dataset("low", "low.tif", requested_bbox, 2.0, -2.0, None);
@@ -1004,6 +1012,7 @@ mod tests {
 
         let result = service
             .elevations_in_bbox(requested_bbox, Some(ResolutionHint::Highest))
+            .await
             .unwrap();
 
         assert_eq!(result.width, 4);
@@ -1021,8 +1030,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elevations_in_bbox_uses_lowest_resolution_hint() {
+    #[tokio::test]
+    async fn elevations_in_bbox_uses_lowest_resolution_hint() {
         let requested_bbox = bbox(0.0, 0.0, 4.0, 4.0);
 
         let low = dataset("low", "low.tif", requested_bbox, 2.0, -2.0, None);
@@ -1061,6 +1070,7 @@ mod tests {
 
         let result = service
             .elevations_in_bbox(requested_bbox, Some(ResolutionHint::Lowest))
+            .await
             .unwrap();
 
         assert_eq!(result.width, 2);
@@ -1075,8 +1085,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elevations_in_bbox_gets_data_from_two_datasets_with_different_resolution() {
+    #[tokio::test]
+    async fn elevations_in_bbox_gets_data_from_two_datasets_with_different_resolution() {
         let requested_bbox = bbox(3.0, 0.0, 6.0, 3.0);
 
         let left = dataset("left", "left.tif", bbox(0.0, 0.0, 4.0, 8.0), 1.0, 1.0, None);
@@ -1126,6 +1136,7 @@ mod tests {
 
         let result = service
             .elevations_in_bbox(requested_bbox, Some(ResolutionHint::Highest))
+            .await
             .unwrap();
 
         assert_eq!(result.width, 3);

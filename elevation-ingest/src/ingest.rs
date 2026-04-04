@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::gdal_process;
 
+// TODO: should be in settings, now only ingest knows
 const BASE_CRS: &str = "EPSG:4326";
 
 #[derive(Debug, thiserror::Error)]
@@ -119,7 +120,7 @@ fn get_crs(dataset: &Dataset) -> Result<Crs, IngestError> {
         source_path = %source_path.display(),
     )
 )]
-pub fn run(
+pub async fn run(
     dataset_id: String,
     source_path: PathBuf,
     artifact_storage: impl ArtifactStorage,
@@ -172,6 +173,7 @@ pub fn run(
 
     let artifact_path = artifact_storage
         .save_artifact(&dataset_id, current_path.as_path())
+        .await
         .map_err(|err| {
             tracing::error!(error = %err, path = %current_path.display(), "failed to save to artifact storage");
 
@@ -189,11 +191,14 @@ pub fn run(
         artifact_path,
         raster: raster_metadata,
     };
-    metadata_storage.save_metadata(metadata).map_err(|err| {
-        tracing::error!(error = %err, "failed to save to metadata storage");
+    metadata_storage
+        .save_metadata(metadata)
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "failed to save to metadata storage");
 
-        IngestError::MetadataStorage
-    })?;
+            IngestError::MetadataStorage
+        })?;
     tracing::info!("metadata stored");
 
     // TODO: clean up on error

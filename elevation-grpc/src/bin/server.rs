@@ -49,8 +49,10 @@ impl pb::elevation_server::Elevation for ApiServer {
         let (tx, rx) = mpsc::channel(128);
         tokio::spawn(async move {
             for point in points {
+                // TODO: rework unwrap
                 let value = elevation_service
                     .elevation_at_point(point.0, point.1)
+                    .await
                     .unwrap();
                 let response = LineStringElevationResponse {
                     point: Some(pb::Point::default()),

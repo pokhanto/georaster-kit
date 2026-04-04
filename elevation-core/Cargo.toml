@@ -7,3 +7,6 @@ edition = "2024"
 elevation-types = { path = "../elevation-types/" }
 tracing = "0.1.44"
 thiserror = "2.0.18"
+
+[dev-dependencies]
+tokio = { version = "1.51.0", features = ["rt-multi-thread", "macros"] }

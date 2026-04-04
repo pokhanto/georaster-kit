@@ -7,16 +7,17 @@ use elevation_core::ElevationService;
 #[derive(Debug, Parser)]
 struct Args {
     #[arg(long)]
-    x: f64,
+    lon: f64,
     #[arg(long)]
-    y: f64,
+    lat: f64,
     #[arg(long)]
     base_dir: PathBuf,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
-    let Args { x, y, base_dir } = args;
+    let Args { lon, lat, base_dir } = args;
 
     let metadata_storage = FsMetadataStorage::new(base_dir);
     let raster_reader = GdalRasterReader;
@@ -24,7 +25,8 @@ fn main() {
     let service = ElevationService::new(metadata_storage, raster_reader);
 
     let elevation = service
-        .elevation_at_point(x, y)
+        .elevation_at_point(lon, lat)
+        .await
         .expect("Can't get elevation");
     println!("elev {:?}", elevation);
 }
