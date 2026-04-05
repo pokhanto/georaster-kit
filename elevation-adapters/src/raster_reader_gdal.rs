@@ -5,6 +5,7 @@ use gdal::Dataset;
 
 const RASTER_BAND_INDEX_WITH_DATA: usize = 1;
 
+#[derive(Debug, Clone)]
 pub struct GdalRasterReader;
 
 impl RasterReader<f64> for GdalRasterReader {

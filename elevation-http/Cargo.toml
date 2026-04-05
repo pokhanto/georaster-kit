@@ -1,0 +1,23 @@
+[package]
+name = "elevation-http"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+elevation-adapters = { path = "../elevation-adapters" }
+elevation-types = { path = "../elevation-types" }
+elevation-core = { path = "../elevation-core" }
+tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread"] }
+axum = { version = "0.8.8" }
+serde = { version = "1.0.228", features = ["derive"] }
+futures-util = "0.3.32"
+tokio-stream = "0.1.18"
+tower-http = { version = "0.6.8", features = ["trace", "cors"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+thiserror = "2.0.18"
+async-stream = "0.3.6"
+h3o = { version = "0.9.4", features = ["geo"] }
+geo = "0.32.0"
+rayon = "1.11.0"
+dotenvy = "0.15.7"

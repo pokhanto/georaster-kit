@@ -4,7 +4,7 @@ use elevation_types::{
 };
 
 // TODO: Add more error variants
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum ElevationServiceError {
     #[error("Can't read metadata")]
     Metadata,
@@ -14,6 +14,7 @@ pub enum ElevationServiceError {
 }
 
 /// Service for resolving elevations from raster data using dataset metadata.
+#[derive(Debug, Clone)]
 pub struct ElevationService<M, R> {
     metadata: M,
     raster: R,
@@ -522,6 +523,7 @@ fn create_raster_processing_plan(
     ))
 }
 
+// TODO:: check malformed bbox
 #[cfg(test)]
 mod tests {
     use super::*;

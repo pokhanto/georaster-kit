@@ -6,5 +6,5 @@ members = [
   "elevation-ingest",
   "elevation-cli",
   "elevation-adapters",
-  "elevation-grpc",
+  "elevation-grpc", "elevation-http",
 ]

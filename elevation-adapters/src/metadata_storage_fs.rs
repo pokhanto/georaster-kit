@@ -7,6 +7,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
+#[derive(Debug, Clone)]
 pub struct FsMetadataStorage {
     base_dir: PathBuf,
 }

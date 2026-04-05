@@ -1,3 +1,4 @@
+use geo::{LineString, Polygon, Rect};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -261,7 +262,7 @@ impl Crs {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResolutionHint {
     Highest,
     Lowest,
@@ -328,6 +329,31 @@ impl Bounds {
 
     pub fn contains_point(&self, lon: f64, lat: f64) -> bool {
         lon >= self.min_lon && lon <= self.max_lon && lat >= self.min_lat && lat <= self.max_lat
+    }
+}
+
+impl From<Bounds> for Polygon<f64> {
+    fn from(value: Bounds) -> Self {
+        let exterior = LineString::from(vec![
+            (value.min_lon, value.min_lat),
+            (value.max_lon, value.min_lat),
+            (value.max_lon, value.max_lat),
+            (value.min_lon, value.max_lat),
+            (value.min_lon, value.min_lat),
+        ]);
+
+        Polygon::new(exterior, vec![])
+    }
+}
+
+impl From<Rect> for Bounds {
+    fn from(value: Rect) -> Self {
+        Self {
+            min_lon: value.min().x,
+            min_lat: value.min().y,
+            max_lon: value.max().x,
+            max_lat: value.max().y,
+        }
     }
 }
 
