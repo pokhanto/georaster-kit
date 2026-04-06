@@ -1,3 +1,5 @@
+//! HTTP routes for tile lookup and tile streaming.
+
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -11,6 +13,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{AppError, AppState, domain::Tile};
 
+/// Query parameters for tile streaming over bounding box.
 #[derive(Debug, Deserialize)]
 pub struct TilesStreamRequest {
     pub zoom: u8,
@@ -20,6 +23,7 @@ pub struct TilesStreamRequest {
     pub max_lat: f64,
 }
 
+/// HTTP response for tile.
 #[derive(Serialize)]
 pub struct TileResponse {
     id: String,
@@ -43,26 +47,32 @@ enum ServerEvent {
     Done,
 }
 
+/// Builds tile routes.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/stream", get(stream_tiles))
         .route("/{id}", get(get_tile))
 }
 
+/// Returns a single tile by id.
 #[tracing::instrument(skip(state), fields(tile_id = %id))]
 pub async fn get_tile(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<TileResponse>, AppError> {
     tracing::info!("starting handling get tile");
-    let tile = state.tile_service.get_tile_by_id(id).await.map_err(|err| {
-        tracing::error!(error = ?err, "failed to build tile");
-        AppError::BuildTile
-    })?;
+    let tile = state
+        .tile_service
+        .get_tile_by_id(id)
+        .await
+        .inspect_err(|err| {
+            tracing::error!(error = ?err, "failed to build tile");
+        })?;
 
     Ok(Json(tile.into()))
 }
 
+/// Streams tiles for the requested bounding box.
 #[tracing::instrument(
     skip(state),
     fields(
@@ -89,9 +99,8 @@ pub async fn stream_tiles(
     let tile_ids = state
         .tile_service
         .get_tile_ids_for_bbox(bbox, zoom)
-        .map_err(|err| {
+        .inspect_err(|err| {
             tracing::error!(error = ?err, "failed to resolve tile ids for bbox");
-            AppError::BboxTiles
         })?;
 
     tracing::debug!(tile_count = tile_ids.len(), "resolved tile ids for stream");

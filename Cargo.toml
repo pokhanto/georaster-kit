@@ -7,5 +7,5 @@ members = [
   "elevation-cli",
   "elevation-adapters",
   "elevation-profile-grpc",
-  "elevation-http",
+  "elevation-tiles-http",
 ]

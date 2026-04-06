@@ -1,13 +1,22 @@
+//! Tile service for resolving H3 tiles and their aggregated elevations.
+//!
+//! This module maps tile requests to elevation lookups and caches computed tiles.
+
 use elevation_types::{Bounds, ResolutionHint};
 use geo::{BoundingRect, LineString};
 use h3o::{
     CellIndex, Resolution,
     geom::{ContainmentMode, TilerBuilder},
 };
+use moka::future::Cache;
 use std::str::FromStr;
 
-use crate::{application::elevation_provider::ElevationProvider, domain::Tile};
+use crate::{
+    application::{elevation_provider::ElevationProvider, tile_aggregator::TileAggregator},
+    domain::Tile,
+};
 
+/// Errors returned by [`TileService`].
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TileServiceError {
     #[error("Incorrect zoom level")]
@@ -20,21 +29,37 @@ pub enum TileServiceError {
     Elevation,
 }
 
+/// Resolves tiles and caches computed results.
 #[derive(Clone, Debug)]
 pub struct TileService<EP> {
     elevation_provider: EP,
+    cache: Cache<String, Tile>,
 }
 
 impl<EP> TileService<EP>
 where
     EP: ElevationProvider,
 {
-    pub fn new(elevation_provider: EP) -> Self {
-        Self { elevation_provider }
+    /// Creates tile service with in-memory cache.
+    pub fn new(elevation_provider: EP, cache_max_capacity: u64) -> Self {
+        let cache = Cache::builder().max_capacity(cache_max_capacity).build();
+
+        Self {
+            elevation_provider,
+            cache,
+        }
     }
 
+    /// Returns tile by id, using cache when possible.
     #[tracing::instrument(skip(self), fields(tile_id = %tile_id))]
     pub async fn get_tile_by_id(&self, tile_id: String) -> Result<Tile, TileServiceError> {
+        if let Some(tile) = self.cache.get(&tile_id).await {
+            tracing::debug!(tile_id, "tile cache hit");
+            return Ok(tile);
+        }
+
+        tracing::debug!(tile_id, "tile cache miss");
+
         let cell_index = CellIndex::from_str(&tile_id).map_err(|err| {
             tracing::debug!(error = ?err, "failed to parse tile id as h3 cell");
             TileServiceError::UnknownTile
@@ -63,13 +88,15 @@ where
             "fetched elevations for tile"
         );
 
-        let tile = Tile::new_with_mean_elevation(tile_id, elevations.values);
+        let tile = TileAggregator::build_tile_with_mean_elevation(tile_id, elevations.values);
 
         tracing::info!("tile with elevation resolved");
+        self.cache.insert(tile.id().to_owned(), tile.clone()).await;
 
         Ok(tile)
     }
 
+    /// Resolves H3 tile ids covering the provided bounding box.
     #[tracing::instrument(
         skip(self),
         fields(
@@ -187,7 +214,7 @@ mod tests {
             None,
             Some(Elevation(30.0)),
         ]);
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let tile = service.get_tile_by_id(valid_tile_id()).await.unwrap();
 
@@ -198,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn get_tile_by_id_returns_unknown_tile_for_invalid_id() {
         let provider = FakeElevationProvider::ok(vec![Some(Elevation(10.0))]);
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let result = service.get_tile_by_id("not-a-valid-tile".to_string()).await;
 
@@ -210,7 +237,7 @@ mod tests {
         let provider = FakeElevationProvider::err(ElevationProviderError::Elevation(
             elevation_core::ElevationServiceError::Metadata,
         ));
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let result = service.get_tile_by_id(valid_tile_id()).await;
 
@@ -221,7 +248,7 @@ mod tests {
     async fn get_tile_by_id_passes_highest_resolution_hint_to_provider() {
         let provider = FakeElevationProvider::ok(vec![Some(Elevation(42.0))]);
         let provider_for_assert = provider.clone();
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let _ = service.get_tile_by_id(valid_tile_id()).await.unwrap();
 
@@ -234,7 +261,7 @@ mod tests {
     async fn get_tile_by_id_passes_proper_bbox_to_provider() {
         let provider = FakeElevationProvider::ok(vec![Some(Elevation(42.0))]);
         let provider_for_assert = provider.clone();
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let _ = service.get_tile_by_id(valid_tile_id()).await.unwrap();
 
@@ -249,7 +276,7 @@ mod tests {
     #[test]
     fn get_tile_ids_for_bbox_returns_non_empty_result_for_valid_input() {
         let provider = FakeElevationProvider::ok(vec![]);
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let tile_ids = service.get_tile_ids_for_bbox(valid_bbox(), 10).unwrap();
 
@@ -259,7 +286,7 @@ mod tests {
     #[test]
     fn get_tile_ids_for_bbox_returns_zoom_level_error_for_invalid_zoom() {
         let provider = FakeElevationProvider::ok(vec![]);
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let result = service.get_tile_ids_for_bbox(valid_bbox(), 255);
 
@@ -269,7 +296,7 @@ mod tests {
     #[test]
     fn get_tile_ids_for_bbox_returns_only_valid_h3_indexes() {
         let provider = FakeElevationProvider::ok(vec![]);
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let tile_ids = service.get_tile_ids_for_bbox(valid_bbox(), 10).unwrap();
 
@@ -284,7 +311,7 @@ mod tests {
     #[test]
     fn get_tile_ids_for_bbox_returns_unique_tile_ids() {
         let provider = FakeElevationProvider::ok(vec![]);
-        let service = TileService::new(provider);
+        let service = TileService::new(provider, 10);
 
         let tile_ids = service.get_tile_ids_for_bbox(valid_bbox(), 10).unwrap();
 
