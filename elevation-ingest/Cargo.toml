@@ -8,3 +8,8 @@ elevation-types = { path = "../elevation-types" }
 thiserror = "2.0.18"
 tracing = "0.1.44"
 gdal = "0.19.0"
+tempfile = "3.27.0"
+
+[dev-dependencies]
+elevation-adapters = { path = "../elevation-adapters" }
+tokio = { version = "1.51.0", features = ["rt-multi-thread", "macros"] }

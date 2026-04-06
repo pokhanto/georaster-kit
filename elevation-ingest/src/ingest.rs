@@ -1,15 +1,20 @@
+//! Raster ingest pipeline.
+//!
+//! This module prepares source rasters for use by application by optionally
+//! reprojecting them, converting them to COG, extracting metadata,
+//! and storing artifacts and metadata.
+
 use elevation_types::{
     ArtifactStorage, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform, MetadataStorage,
     RasterMetadata,
 };
 use gdal::{Dataset, Metadata};
 use std::path::{Path, PathBuf};
+use tempfile::TempDir;
 
-use crate::gdal_process;
+use crate::gdal_processor::{GdalProcessSettings, GdalProcessor};
 
-// TODO: should be in settings, now only ingest knows
-const BASE_CRS: &str = "EPSG:4326";
-
+/// Errors returned during dataset ingest.
 #[derive(Debug, thiserror::Error)]
 pub enum IngestError {
     #[error("Failed to reproject source raster.")]
@@ -26,26 +31,35 @@ pub enum IngestError {
 
     #[error("Failed to save metadata.")]
     MetadataStorage,
+
+    #[error("Failed to create temporary workspace.")]
+    TempWorkspace,
 }
 
+/// Opens GDAL dataset from disk.
+fn open_dataset(path: &Path) -> Result<Dataset, IngestError> {
+    Dataset::open(path).map_err(|err| {
+        tracing::error!(error = %err, path = %path.display(), "failed to open raster dataset");
+        IngestError::MetadataExtraction
+    })
+}
+
+/// Extracts raster metadata from dataset at given path.
 #[tracing::instrument(skip_all, fields(path = %path.display()))]
 pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestError> {
     tracing::info!("starting metadata extraction");
-    let dataset = Dataset::open(path).map_err(|err| {
-        tracing::error!(error = %err, path = %path.display(), "failed to open raster dataset");
 
-        IngestError::MetadataExtraction
-    })?;
+    let dataset = open_dataset(path)?;
 
     let (width, height) = dataset.raster_size();
-    tracing::debug!(width = %width, height = %height, "raster size extracted");
+    tracing::debug!(width, height, "raster size extracted");
 
     let geo_transform = dataset.geo_transform().map_err(|err| {
         tracing::error!(error = %err, "failed to get geotransform");
-
         IngestError::MetadataExtraction
     })?;
-    tracing::debug!(geo_transform = ?geo_transform, "geotransform extracted");
+    tracing::debug!(?geo_transform, "geotransform extracted");
+
     let min_lon = geo_transform[0];
     let max_lat = geo_transform[3];
     let max_lon = geo_transform[0] + width as f64 * geo_transform[1];
@@ -54,18 +68,19 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestError> 
     let crs = get_crs(&dataset)?;
     tracing::debug!(crs = ?crs, "crs extracted");
 
-    let band_index = 1;
-    let band = dataset.rasterband(band_index).map_err(|err| {
-        tracing::error!(error = %err, "failed to get bands from raster");
-
+    let band = dataset.rasterband(1).map_err(|err| {
+        tracing::error!(error = %err, "failed to get first raster band");
         IngestError::MetadataExtraction
     })?;
+
     let (block_width, block_height) = band.block_size();
-    tracing::debug!(block_width = %block_width, block_height = %block_height, "block size extracted");
+    tracing::debug!(block_width, block_height, "block size extracted");
+
     let nodata = band.no_data_value();
-    tracing::debug!(nodata = ?nodata, "nodata value extracted");
+    tracing::debug!(?nodata, "nodata value extracted");
 
     tracing::info!("metadata extraction completed");
+
     Ok(RasterMetadata {
         crs,
         width,
@@ -91,6 +106,7 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestError> 
     })
 }
 
+/// Returns `true` if dataset is marked as Cloud Optimized GeoTIFF.
 fn is_cog(dataset: &Dataset) -> bool {
     dataset
         .metadata_domain("IMAGE_STRUCTURE")
@@ -99,114 +115,129 @@ fn is_cog(dataset: &Dataset) -> bool {
         .any(|item| item == "LAYOUT=COG")
 }
 
+/// Extracts dataset's CRS.
 fn get_crs(dataset: &Dataset) -> Result<Crs, IngestError> {
     let crs_string = dataset
         .spatial_ref()
         .and_then(|spatial_ref| spatial_ref.authority())
         .map_err(|err| {
-            tracing::error!(error = %err, "failed to get spatial authoruty");
-
+            tracing::error!(error = %err, "failed to get spatial authority");
             IngestError::MetadataExtraction
         })?;
 
     Ok(Crs::new(crs_string))
 }
 
-// TODO: should accept target crs
 #[tracing::instrument(
     skip(artifact_storage, metadata_storage),
     fields(
         dataset_id = %dataset_id,
         source_path = %source_path.display(),
+        target_crs = %target_crs,
     )
 )]
 pub async fn run(
     dataset_id: String,
     source_path: PathBuf,
+    target_crs: Crs,
     artifact_storage: impl ArtifactStorage,
     metadata_storage: impl MetadataStorage,
 ) -> Result<(), IngestError> {
     tracing::info!("starting ingest");
-    let mut current_path = source_path;
-    let mut tmp_paths = vec![];
 
-    let dataset = Dataset::open(&current_path).map_err(|err| {
-        tracing::error!(error = %err, path = %current_path.display(), "failed to open raster dataset");
-
-        IngestError::MetadataExtraction
+    let temp_dir = TempDir::new().map_err(|err| {
+        tracing::error!(error = %err, "failed to create temp workspace");
+        IngestError::TempWorkspace
     })?;
 
-    // If source have no knonw CRS - still try to reproject
-    let source_crs = get_crs(&dataset).unwrap_or_else(|err| {
-        tracing::warn!(error = %err, "can't get CRS from dataset, falling back to Unknown CRS");
+    let mut current_path = source_path;
+    let gdal_processor = GdalProcessor::new(GdalProcessSettings::default());
 
+    let dataset = open_dataset(&current_path)?;
+
+    let source_crs = get_crs(&dataset).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "failed to determine CRS, falling back to unknown CRS");
         Crs::unknown()
     });
-    if source_crs != Crs::new(BASE_CRS) {
-        tracing::info!("reprojection required");
-        let reprojected_path = gdal_process::reproject(&current_path, BASE_CRS).map_err(|err| {
-            tracing::error!(error = %err, path = %current_path.display(), crs_to = %BASE_CRS, crs_from = %source_crs, "failed to reproject");
 
-            IngestError::Reprojection
-        })?;
+    if source_crs != target_crs {
+        tracing::info!(from = %source_crs, to = %target_crs, "reprojection required");
 
-        current_path = reprojected_path.clone();
-        tmp_paths.push(reprojected_path);
+        let reprojected_path = temp_dir.path().join("reprojected.tif");
+
+        gdal_processor
+            .reproject_to_path(&current_path, target_crs.as_ref(), &reprojected_path)
+            .map_err(|err| {
+                tracing::error!(
+                    error = %err,
+                    path = %current_path.display(),
+                    crs_from = %source_crs,
+                    crs_to = %target_crs.as_ref(),
+                    "failed to reproject raster"
+                );
+                IngestError::Reprojection
+            })?;
+
+        current_path = reprojected_path;
     }
 
-    let dataset = Dataset::open(&current_path).map_err(|err| {
-        tracing::error!(error = %err, path = %current_path.display(), "failed to open raster dataset");
-
-        IngestError::MetadataExtraction
-    })?;
+    let dataset = open_dataset(&current_path)?;
 
     if !is_cog(&dataset) {
         tracing::info!("cog conversion required");
-        let translated_path = gdal_process::translate_to_cog(&current_path).map_err(|err| {
-            tracing::error!(error = %err, path = %current_path.display(), "failed to translate to COG");
 
-            IngestError::CogConversion
-        })?;
-        current_path = translated_path.clone();
-        tmp_paths.push(translated_path);
+        let translated_path = temp_dir.path().join("translated.cog.tif");
+
+        gdal_processor
+            .translate_to_cog_path(&current_path, &translated_path)
+            .map_err(|err| {
+                tracing::error!(
+                    error = %err,
+                    path = %current_path.display(),
+                    "failed to translate raster to COG"
+                );
+                IngestError::CogConversion
+            })?;
+
+        current_path = translated_path;
     }
 
     let artifact_path = artifact_storage
         .save_artifact(&dataset_id, current_path.as_path())
         .await
         .map_err(|err| {
-            tracing::error!(error = %err, path = %current_path.display(), "failed to save to artifact storage");
-
+            tracing::error!(
+                error = %err,
+                path = %current_path.display(),
+                "failed to save artifact"
+            );
             IngestError::ArtifactStorage
         })?;
     tracing::info!(artifact_path = %artifact_path, "artifact stored");
 
     let raster_metadata = read_raster_metadata(&current_path).map_err(|err| {
-        tracing::debug!(error = %err, path = %current_path.display(), "failed to get raster metadata");
-
+        tracing::error!(
+            error = %err,
+            path = %current_path.display(),
+            "failed to extract raster metadata"
+        );
         IngestError::MetadataExtraction
     })?;
+
     let metadata = DatasetMetadata {
         dataset_id,
         artifact_path,
         raster: raster_metadata,
     };
+
     metadata_storage
         .save_metadata(metadata)
         .await
         .map_err(|err| {
-            tracing::error!(error = %err, "failed to save to metadata storage");
-
+            tracing::error!(error = %err, "failed to save metadata");
             IngestError::MetadataStorage
         })?;
     tracing::info!("metadata stored");
-
-    // TODO: clean up on error
-    for tmp_path in tmp_paths {
-        if let Err(err) = std::fs::remove_file(&tmp_path) {
-            tracing::warn!(error = %err, path = %tmp_path.display(), "failed to remove temp file");
-        }
-    }
 
     tracing::info!("ingest completed");
     Ok(())

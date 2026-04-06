@@ -1,9 +1,14 @@
 use clap::Parser;
 use elevation_adapters::{FsArtifactStorage, FsMetadataStorage};
 use elevation_ingest::ingest;
+use elevation_types::Crs;
 use std::path::PathBuf;
 
 mod telemetry;
+
+// TODO: atm this is only supported CRS,
+// so every dataset will be translated to it
+const CRS: &str = "ESGP:4326";
 
 /// Ingest source DEM dataset into artifact and metadata storage.
 #[derive(Debug, Parser)]
@@ -53,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ingest(
         dataset_id,
         source_dataset_path,
+        Crs::new(CRS),
         artifact_storage,
         metadata_storage,
     )

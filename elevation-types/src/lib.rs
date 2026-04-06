@@ -262,6 +262,12 @@ impl Crs {
     }
 }
 
+impl AsRef<str> for Crs {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolutionHint {
     Highest,
