@@ -2,7 +2,7 @@
 
 CLI tool for preparing elevation datasets for use in `elevation-kit`.
 
-It takes source GeoTIFF, optionally reprojects it, converts it to a Cloud Optimized GeoTIFF (COG) when needed, stores artifact, and writes dataset metadata.
+It takes source GeoTIFF, optionally reprojects it, converts it to Cloud Optimized GeoTIFF (COG) when needed, stores artifact, and writes dataset metadata.
 
 ## What it does
 
@@ -28,14 +28,15 @@ elevation-prepare-cli \
 ```
 
 ## Docker
-Build
 
-```
+Build image from workspace root:
+
+```bash
 docker build -f elevation-prepare-cli/Dockerfile -t elevation-prepare-cli .
 ```
 
 Run
-```
+```bash
 docker run --rm \
   -v "$(pwd)/data_input:/input:ro" \
   -v "$(pwd)/data:/data" \
