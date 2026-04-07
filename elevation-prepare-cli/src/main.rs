@@ -8,7 +8,7 @@ mod telemetry;
 
 // TODO: atm this is only supported CRS,
 // so every dataset will be translated to it
-const CRS: &str = "ESGP:4326";
+const CRS: &str = "EPSG:4326";
 
 /// Ingest source DEM dataset into artifact and metadata storage.
 #[derive(Debug, Parser)]
