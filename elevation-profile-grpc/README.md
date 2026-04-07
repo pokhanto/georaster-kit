@@ -4,6 +4,38 @@
 
 It is part of `elevation-kit` workspace and uses prepared raster artifacts and metadata produced by `elevation-prepare-cli`.
 
+```mermaid
+flowchart TD
+    Client["Client<br/>gRPC client"]
+
+    subgraph GrpcApp["gRPC app, elevation-profile-grpc"]
+        Api["Tonic gRPC API:<br/>LineString elevation streaming"]
+        ProfileService["ProfileService:<br/>Path sampling<br/>Point-by-point elevation resolution"]
+    end
+
+    subgraph Core["Core query layer, elevation-core"]
+        ElevationService["ElevationService:<br/>Point elevation query"]
+    end
+
+    subgraph Adapters["Adapters, elevation-adapters"]
+        Metadata["FsMetadataStorage"]
+        Raster["GdalRasterReader"]
+    end
+
+    subgraph Data["Prepared data"]
+        Registry["registry.json"]
+        Artifact["Prepared raster artifact<br/>GeoTIFF / COG"]
+    end
+
+    Client --> Api
+    Api --> ProfileService
+    ProfileService --> ElevationService
+    ElevationService --> Metadata
+    ElevationService --> Raster
+    Metadata --> Registry
+    Raster --> Artifact
+```
+
 ## What it does
 
 - accepts path as sequence of geographic points

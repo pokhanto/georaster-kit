@@ -2,6 +2,39 @@
 
 `elevation-kit` is set of tools for preparing elevation datasets and serving elevation data over different transports.
 
+### Main idea
+`elevation-kit` is composable and extensible workspace.  
+Core crates provide shared domain types, query logic, and infrastructure adapters, while runnable applications such as `elevation-prepare-cli`, `elevation-tiles-http`, and `elevation-profile-grpc` compose these building blocks into different user-facing tools and services.
+
+```mermaid
+flowchart TD
+    subgraph Prepare["Preparation"]
+        PrepareCli["elevation-prepare-cli"]
+    end
+
+    subgraph Shared["Shared workspace crates"]
+        Domain["elevation-domain"]
+        Core["elevation-core"]
+        Adapters["elevation-adapters"]
+    end
+
+    subgraph Runtime["Runtime apps"]
+        Http["elevation-tiles-http"]
+        Grpc["elevation-profile-grpc"]
+    end
+
+    PrepareCli --> Adapters
+    PrepareCli --> Domain
+
+    Http --> Core
+    Http --> Domain
+    Http --> Adapters
+
+    Grpc --> Core
+    Grpc --> Domain
+    Grpc --> Adapters
+```
+
 Main runnable components at the moment:
 
 - `elevation-prepare-cli` — prepares source datasets and writes metadata

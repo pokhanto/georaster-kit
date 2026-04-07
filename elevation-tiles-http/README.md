@@ -8,23 +8,23 @@ It is part of `elevation-kit` and uses prepared artifacts and metadata.
 flowchart TD
     Client["Client<br/>browser / curl / frontend"]
 
-    subgraph HttpApp["elevation-tiles-http"]
-        Routes["Axum HTTP routes<br/>GET /tiles/{id}<br/>GET /tiles/stream"]
-        TileService["TileService<br/>H3 tile resolution<br/>tile cache<br/>mean elevation aggregation"]
+    subgraph HttpApp["HTTP app, elevation-tiles-http"]
+        Routes["Axum HTTP routes:<br/>GET /tiles/{id}<br/>GET /tiles/stream"]
+        TileService["TileService:<br/>H3 tile resolution<br/>Tile cache<br/>Tile elevation aggregation"]
     end
 
-    subgraph Core["Core query layer"]
-        ElevationService["ElevationService<br/>bbox elevations"]
+    subgraph Core["Core query layer, elevation-core"]
+        ElevationService["ElevationService:<br/>Bbox elevation query"]
     end
 
-    subgraph Adapters["Adapters"]
+    subgraph Adapters["Adapters, elevation-adapters"]
         Metadata["FsMetadataStorage"]
         Raster["GdalRasterReader"]
     end
 
     subgraph Data["Prepared data"]
         Registry["registry.json"]
-        Artifact["prepared raster file<br/>GeoTIFF / COG"]
+        Artifact["Prepared raster artifact<br/>GeoTIFF / COG"]
     end
 
     Client --> Routes
