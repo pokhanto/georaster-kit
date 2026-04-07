@@ -56,10 +56,13 @@ pub trait MetadataStorage {
 }
 
 /// Errors returned by artifact storage implementations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ArtifactStorageError {
     #[error("Failed to prepare artifact storage location")]
     PrepareStorage,
+
+    #[error("Artifact with Id already exists")]
+    DuplicateId,
 
     #[error("Failed to save artifact")]
     Save,
