@@ -1,12 +1,16 @@
+//! Filesystem-backed artifact storage.
+
 use elevation_domain::{ArtifactLocator, ArtifactStorage, ArtifactStorageError};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Stores artifacts in local filesystem.
 pub struct FsArtifactStorage {
     base_dir: PathBuf,
 }
 
 impl FsArtifactStorage {
+    /// Creates filesystem artifact storage rooted at `base_dir`.
     pub fn new(base_dir: PathBuf) -> Self {
         Self { base_dir }
     }

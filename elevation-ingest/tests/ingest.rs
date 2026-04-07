@@ -1,11 +1,12 @@
 use elevation_adapters::{FsArtifactStorage, FsMetadataStorage};
-use elevation_ingest::ingest;
 use elevation_domain::{Crs, MetadataStorage};
+use elevation_ingest::ingest;
 use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[tokio::test]
 async fn ingest_stores_artifact_and_metadata_for_raster_fixture() {
+    let metadata_registry_name = "registry";
     let temp_dir = tempdir().unwrap();
     let base_dir = temp_dir.path().to_path_buf();
 
@@ -14,7 +15,7 @@ async fn ingest_stores_artifact_and_metadata_for_raster_fixture() {
     let target_crs = Crs::new("EPSG:4326".to_string());
 
     let artifact_storage = FsArtifactStorage::new(base_dir.clone());
-    let metadata_storage = FsMetadataStorage::new(base_dir.clone());
+    let metadata_storage = FsMetadataStorage::new(base_dir.clone(), metadata_registry_name.into());
 
     ingest(
         dataset_id.clone(),
@@ -26,7 +27,7 @@ async fn ingest_stores_artifact_and_metadata_for_raster_fixture() {
     .await
     .unwrap();
 
-    let metadata_storage = FsMetadataStorage::new(base_dir);
+    let metadata_storage = FsMetadataStorage::new(base_dir, metadata_registry_name.into());
 
     let mut metadata = metadata_storage.load_metadata().await.unwrap();
     let metadata = metadata.remove(0);

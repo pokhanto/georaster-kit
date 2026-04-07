@@ -5,6 +5,7 @@ use std::{net::SocketAddr, path::PathBuf};
 pub struct Config {
     pub app_addr: SocketAddr,
     pub metadata_dir: PathBuf,
+    pub metadata_registry_name: String,
     pub tile_cache_max_capacity: u64,
 }
 
@@ -16,6 +17,7 @@ impl Config {
         let app_addr: SocketAddr = format!("{app_host}:{app_port}").parse()?;
 
         let metadata_dir: PathBuf = dotenvy::var("METADATA_STORAGE_DIR")?.into();
+        let metadata_registry_name = dotenvy::var("METADATA_REGISTRY_NAME")?;
 
         let tile_cache_max_capacity: u64 = dotenvy::var("TILE_CACHE_MAX_CAPACITY")?.parse()?;
 
@@ -23,6 +25,7 @@ impl Config {
             app_addr,
             metadata_dir,
             tile_cache_max_capacity,
+            metadata_registry_name,
         })
     }
 }

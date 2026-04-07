@@ -1,3 +1,5 @@
+//! GDAL-backed raster reader.
+
 use elevation_domain::{
     ArtifactLocator, RasterReadWindow, RasterReader, RasterReaderError, RasterWindowData,
 };
@@ -5,6 +7,7 @@ use gdal::Dataset;
 
 const RASTER_BAND_INDEX_WITH_DATA: usize = 1;
 
+/// Reads raster windows from artifacts using GDAL.
 #[derive(Debug, Clone)]
 pub struct GdalRasterReader;
 
@@ -84,10 +87,7 @@ impl RasterReader<f64> for GdalRasterReader {
         })
         .await
         .map_err(|err| {
-            tracing::debug!(
-                error = %err,
-                "spawn_blocking task failed"
-            );
+            tracing::debug!(error = %err, "spawn_blocking task failed");
             RasterReaderError::Read
         })?
     }

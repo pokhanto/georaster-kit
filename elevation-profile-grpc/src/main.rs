@@ -14,7 +14,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::from_env()?;
 
-    let metadata_storage = FsMetadataStorage::new(config.metadata_dir);
+    let metadata_storage =
+        FsMetadataStorage::new(config.metadata_dir, config.metadata_registry_name);
     let raster_reader = GdalRasterReader;
     let elevation_service = ElevationService::new(metadata_storage, raster_reader);
 

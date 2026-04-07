@@ -1,3 +1,5 @@
+//! Filesystem-backed metadata storage.
+
 use std::path::{Path, PathBuf};
 
 use elevation_domain::{DatasetMetadata, MetadataStorage, MetadataStorageError};
@@ -7,14 +9,20 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
+/// Stores dataset metadata in local JSON registry file.
 #[derive(Debug, Clone)]
 pub struct FsMetadataStorage {
     base_dir: PathBuf,
+    registry_name: String,
 }
 
 impl FsMetadataStorage {
-    pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+    /// Creates filesystem metadata storage rooted at `base_dir`.
+    pub fn new(base_dir: PathBuf, registry_name: String) -> Self {
+        Self {
+            base_dir,
+            registry_name,
+        }
     }
 }
 
@@ -22,8 +30,6 @@ impl FsMetadataStorage {
 struct FsMetadataRegistry {
     metadata: Vec<DatasetMetadata>,
 }
-
-const METADATA_FILE_NAME: &str = "registry.json";
 
 impl MetadataStorage for FsMetadataStorage {
     #[tracing::instrument(skip(self), fields(base_dir = %self.base_dir.display()))]
@@ -40,7 +46,8 @@ impl MetadataStorage for FsMetadataStorage {
             MetadataStorageError::PrepareStorage
         })?;
 
-        let metadata_path = Path::new(&self.base_dir).join(METADATA_FILE_NAME);
+        let registry_filename = format!("{}.json", self.registry_name);
+        let metadata_path = Path::new(&self.base_dir).join(registry_filename);
 
         let mut metadata_file = OpenOptions::new()
             .read(true)
@@ -139,7 +146,8 @@ impl MetadataStorage for FsMetadataStorage {
 
     #[tracing::instrument(skip(self), fields(base_dir = %self.base_dir.display()))]
     async fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError> {
-        let metadata_path = Path::new(&self.base_dir).join(METADATA_FILE_NAME);
+        let registry_filename = format!("{}.json", self.registry_name);
+        let metadata_path = Path::new(&self.base_dir).join(registry_filename);
 
         let mut metadata_file = File::open(&metadata_path).await.map_err(|err| {
             tracing::debug!(

@@ -1,7 +1,7 @@
 use clap::Parser;
 use elevation_adapters::{FsArtifactStorage, FsMetadataStorage};
-use elevation_ingest::ingest;
 use elevation_domain::Crs;
+use elevation_ingest::ingest;
 use std::path::PathBuf;
 
 mod telemetry;
@@ -38,6 +38,12 @@ struct Args {
     /// Tool will use this directory for storage backends.
     #[arg(long, value_name = "DIR")]
     base_dir: PathBuf,
+
+    /// Name of metadata storage file.
+    ///
+    /// This name will be used for metadata storage filesystem implementation
+    #[arg(long, value_name = "REGISTRY_NAME")]
+    registry_name: String,
 }
 
 #[tokio::main]
@@ -50,9 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source_dataset_path,
         dataset_id,
         base_dir,
+        registry_name,
     } = args;
 
-    let metadata_storage = FsMetadataStorage::new(base_dir.to_owned());
+    let metadata_storage = FsMetadataStorage::new(base_dir.to_owned(), registry_name);
     let artifact_storage = FsArtifactStorage::new(base_dir);
 
     ingest(

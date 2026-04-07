@@ -6,6 +6,7 @@ pub struct Config {
     pub sample_step_meters: f64,
     pub metadata_dir: PathBuf,
     pub max_samples: usize,
+    pub metadata_registry_name: String,
 }
 
 impl Config {
@@ -27,6 +28,7 @@ impl Config {
             .transpose()?
             .unwrap_or(50000);
 
+        let metadata_registry_name = dotenvy::var("METADATA_REGISTRY_NAME")?;
         let metadata_dir: PathBuf = dotenvy::var("METADATA_STORAGE_DIR")?.into();
         metadata_dir.try_exists()?;
 
@@ -35,6 +37,7 @@ impl Config {
             sample_step_meters,
             metadata_dir,
             max_samples,
+            metadata_registry_name,
         })
     }
 }

@@ -21,7 +21,7 @@ pub struct ElevationService<M, R> {
 }
 
 impl<M, R> ElevationService<M, R> {
-    /// Creates a new elevation service with metadata storage and raster reader.
+    /// Creates new elevation service with metadata storage and raster reader.
     pub fn new(metadata: M, raster: R) -> Self {
         Self { metadata, raster }
     }
@@ -36,39 +36,39 @@ where
     ///
     /// Service:
     /// - loads available dataset metadata,
-    /// - selects a dataset whose bounds contain the requested point,
-    /// - converts the geographic coordinate into raster pixel coordinates,
-    /// - reads a single raster cell,
+    /// - selects dataset whose bounds contain requested point,
+    /// - converts geographic coordinate into raster pixel coordinates,
+    /// - reads single raster cell,
     /// - returns its value as [`Elevation`].
     ///
-    /// If no dataset contains the point, or if the resolved raster value equals the
-    /// dataset `nodata` value, this method returns `Ok(None)`.
+    /// If no dataset contains point, or if resolved raster value equals
+    /// dataset's `nodata` value, this method returns `Ok(None)`.
     ///
     /// # Parameters
     ///
-    /// - `lon`: Longitude of the requested point.
-    /// - `lat`: Latitude of the requested point.
+    /// - `lon`: Longitude of requested point.
+    /// - `lat`: Latitude of requested point.
     ///
     /// # Returns
     ///
     /// Returns:
-    /// - `Ok(Some(Elevation))` when a valid elevation value is found,
+    /// - `Ok(Some(Elevation))` when valid elevation value is found,
     /// - `Ok(None)` when:
-    ///   - no dataset covers the point,
-    ///   - the point resolves outside raster bounds,
-    ///   - the raster value is `nodata`,
+    ///   - no dataset covers point,
+    ///   - point resolves outside raster bounds,
+    ///   - raster value is `nodata`,
     /// - `Err(ElevationServiceError)` on metadata or raster read failure.
     ///
     /// # Errors
     ///
     /// Returns [`ElevationServiceError::Metadata`] if dataset metadata cannot be loaded.
     ///
-    /// Returns [`ElevationServiceError::Raster`] if the raster cell cannot be read.
+    /// Returns [`ElevationServiceError::Raster`] if raster cell cannot be read.
     ///
     /// # Notes
     ///
-    /// When multiple datasets contain the requested point, dataset selection is
-    /// delegated to the internal dataset resolution logic.
+    /// When multiple datasets contain requested point, dataset selection is
+    /// delegated to internal dataset resolution logic.
     ///
     /// # Example
     ///
@@ -147,13 +147,13 @@ where
         Ok(elevation_value.map(Elevation))
     }
 
-    /// Returns grid of elevations for the requested bounding box.
+    /// Returns grid of elevations for requested bounding box.
     ///
     /// Service:
     /// - loads available dataset metadata,
-    /// - finds all datasets whose bounds intersect the requested `bbox`,
-    /// - selects the output resolution using `resolution_hint`,
-    /// - reads the corresponding raster windows,
+    /// - finds all datasets whose bounds intersect requested `bbox`,
+    /// - selects output resolution using `resolution_hint`,
+    /// - reads corresponding raster windows,
     /// - merges them into one resulting elevation grid.
     ///
     /// Output values is grid and returned in order:
@@ -165,7 +165,7 @@ where
     /// `ResolutionHint` controls resolution(size) of resulting grid:
     /// - `Highest` picks the finest resolution among intersecting datasets,
     /// - `Lowest` picks the coarsest resolution among intersecting datasets,
-    /// - `Degrees { .. }` uses the explicit requested resolution.
+    /// - `Degrees { .. }` uses explicit requested resolution.
     ///
     /// Cells with raster value equals dataset's `nodata` are left empty (`None`).
     ///
@@ -176,7 +176,7 @@ where
     ///
     /// # Returns
     ///
-    /// A [`BboxElevations`] containing:
+    /// [`BboxElevations`] containing:
     /// - requested bounding box,
     /// - resulting grid width,
     /// - resulting grid height,
@@ -193,7 +193,7 @@ where
     ///
     /// # Notes
     ///
-    /// The current implementation assumes resolution in geographic degree units.
+    /// Current implementation assumes resolution in geographic degree units.
     /// This may not be correct for all CRS types.
     ///
     /// # Example
@@ -427,7 +427,7 @@ fn lonlat_to_raster_coord(metadata: &DatasetMetadata, lon: f64, lat: f64) -> Opt
     Some(Placement::new(col, row))
 }
 
-/// Builds a raster read window and target placement for an intersecting bbox.
+/// Builds raster read window and target placement for an intersecting bbox.
 ///
 /// Returns `None` when source or target coordinates cannot be mapped to valid window.
 fn create_raster_processing_plan(

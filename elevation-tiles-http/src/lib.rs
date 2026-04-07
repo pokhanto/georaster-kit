@@ -26,12 +26,13 @@ pub async fn run(
     app_addr: SocketAddr,
     metadata_storage_dir: PathBuf,
     tile_cache_max_capacity: u64,
+    metadata_registry_name: String,
 ) -> Result<(), std::io::Error> {
     metadata_storage_dir.try_exists().inspect_err(|err| {
         tracing::error!(err = ?err, "metadata storage is not ready");
     })?;
 
-    let metadata_storage = FsMetadataStorage::new(metadata_storage_dir);
+    let metadata_storage = FsMetadataStorage::new(metadata_storage_dir, metadata_registry_name);
     let raster_reader = GdalRasterReader;
     let elevation_service = ElevationService::new(metadata_storage, raster_reader);
 
