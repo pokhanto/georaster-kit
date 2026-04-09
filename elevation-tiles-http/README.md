@@ -14,12 +14,13 @@ flowchart TD
     end
 
     subgraph Core["Core query layer, elevation-core"]
-        ElevationService["ElevationService:<br/>Bbox elevation query"]
+        ElevationService["ElevationService:<br/>BBox elevation query"]
     end
 
     subgraph Adapters["Adapters, elevation-adapters"]
         Metadata["FsMetadataStorage"]
         Raster["GdalRasterReader"]
+        Resolver["LocalArtifactResolver"]
     end
 
     subgraph Data["Prepared data"]
@@ -32,8 +33,9 @@ flowchart TD
     TileService --> ElevationService
     ElevationService --> Metadata
     ElevationService --> Raster
+    Raster --> Resolver
     Metadata --> Registry
-    Raster --> Artifact
+    Resolver --> Artifact
 ```
 
 ## H3 tiles

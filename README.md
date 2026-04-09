@@ -15,7 +15,7 @@ flowchart TD
     subgraph Shared["Shared workspace crates"]
         Domain["elevation-domain"]
         Core["elevation-core"]
-        Adapters["elevation-adapters"]
+        Adapters["elevation-adapters<br/>storage, raster readers, artifact resolvers"]
     end
 
     subgraph Runtime["Runtime apps"]
@@ -23,15 +23,15 @@ flowchart TD
         Grpc["elevation-profile-grpc"]
     end
 
-    PrepareCli --> Adapters
     PrepareCli --> Domain
+    PrepareCli --> Adapters
 
-    Http --> Core
     Http --> Domain
+    Http --> Core
     Http --> Adapters
 
-    Grpc --> Core
     Grpc --> Domain
+    Grpc --> Core
     Grpc --> Adapters
 ```
 
@@ -127,6 +127,6 @@ curl -N "http://127.0.0.1:3000/tiles/stream?min_lon=36.20&min_lat=49.96&max_lon=
 - Add discovery mode: app that run in directory or S3 bucket and creates metadata storage based on files
 - Consider using primitives from [geo](https://docs.rs/geo/latest/geo/) library
 - Add benchmarks
-- Replace point by point intersection processing with proper grid merge algorithm in core
+- Replace intersection processing with proper grid merge algorithm in core
 - Implement raster reader without GDAL
 - Support median, min, max in `elevation-tiles-http` app

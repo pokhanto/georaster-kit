@@ -20,11 +20,12 @@ flowchart TD
     subgraph Adapters["Adapters, elevation-adapters"]
         Metadata["FsMetadataStorage"]
         Raster["GdalRasterReader"]
+        Resolver["ArtifactResolver S3"]
     end
 
     subgraph Data["Prepared data"]
         Registry["registry.json"]
-        Artifact["Prepared raster artifact<br/>GeoTIFF / COG"]
+        Artifact["Prepared raster artifact S3 object"]
     end
 
     Client --> Api
@@ -32,8 +33,9 @@ flowchart TD
     ProfileService --> ElevationService
     ElevationService --> Metadata
     ElevationService --> Raster
+    Raster --> Resolver
     Metadata --> Registry
-    Raster --> Artifact
+    Resolver --> Artifact
 ```
 
 ## What it does
