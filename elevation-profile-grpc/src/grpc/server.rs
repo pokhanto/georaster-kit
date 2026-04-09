@@ -154,7 +154,7 @@ mod tests {
     async fn stream_returns_internal_when_provider_fails() {
         let provider = FakeElevationProvider {
             result: Err(ElevationProviderError::Elevation(
-                elevation_core::ElevationServiceError::Metadata,
+                elevation_core::ElevationServiceError::MetadataLoad,
             )),
         };
         let profile_service = Arc::new(ProfileService::new(provider, 100));

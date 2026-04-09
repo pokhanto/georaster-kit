@@ -225,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn get_tile_by_id_returns_elevation_error_when_provider_fails() {
         let provider = FakeElevationProvider::err(ElevationProviderError::Elevation(
-            elevation_core::ElevationServiceError::Metadata,
+            elevation_core::ElevationServiceError::MetadataLoad,
         ));
         let service = TileService::new(provider, 10);
 

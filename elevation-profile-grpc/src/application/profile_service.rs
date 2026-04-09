@@ -311,7 +311,7 @@ mod tests {
     #[tokio::test]
     async fn sample_point_maps_provider_error() {
         let provider = FakeElevationProvider::err(ElevationProviderError::Elevation(
-            elevation_core::ElevationServiceError::Metadata,
+            elevation_core::ElevationServiceError::MetadataLoad,
         ));
         let service = ProfileService::new(provider, 500);
 
