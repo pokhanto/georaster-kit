@@ -9,6 +9,7 @@ use axum::{
 use elevation_domain::Bounds;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use tokio::time::Instant;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
 use crate::{AppError, AppState, domain::Tile};
@@ -113,6 +114,8 @@ pub async fn stream_tiles(
 
     tokio::spawn(async move {
         for tile_id in tile_ids {
+            let started_at = Instant::now();
+
             let tile = match state.tile_service.get_tile_by_id(tile_id.clone()).await {
                 Ok(tile) => tile,
                 Err(err) => {
@@ -126,6 +129,11 @@ pub async fn stream_tiles(
                     continue;
                 }
             };
+
+            tracing::info!(
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "tile resolved"
+            );
 
             if tx.send(ServerEvent::Tile(tile.into())).await.is_err() {
                 tracing::debug!("client disconnected while sending tile event");

@@ -44,7 +44,7 @@ Main runnable components at the moment:
 ## GDAL
 Most of `elevation-kit` relies on [GDAL](https://gdal.org/) under the hood for raster access and preprocessing. GDAL is used both through Rust bindings and, in some cases, through command-line tools such as `gdalwarp` and `gdal_translate` to reproject datasets, prepare Cloud Optimized GeoTIFFs, and read raster windows efficiently.
 
-## Quick start for elevation-tiles-http
+## Quick start for elevation-tiles-http as example
 
 This example shows full flow:
 
@@ -118,15 +118,15 @@ curl -N "http://127.0.0.1:3000/tiles/stream?min_lon=36.20&min_lat=49.96&max_lon=
 
 ### Notes
 
-- Docker examples avoid installing GDAL locally.
+- Docker examples allows avoid installing GDAL locally.
 - Mounted `./data` directory is shared between prepare CLI and HTTP service.
 - HTTP service must be configured to use `/data` as its metadata/artifact base directory inside container.
 
 ## TODO:
 - Add more tests
+- Add more benchmarks
 - Add discovery mode: app that run in directory or S3 bucket and creates metadata storage based on files
+- Add more dataset resolving strategies: only high/low quality 
 - Consider using primitives from [geo](https://docs.rs/geo/latest/geo/) library
-- Add benchmarks
 - Replace intersection processing with proper grid merge algorithm in core
 - Implement raster reader without GDAL
-- Support median, min, max in `elevation-tiles-http` app
