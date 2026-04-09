@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::metadata::DatasetMetadata;
 
 /// Errors returned by metadata storage implementations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MetadataStorageError {
     #[error("Failed to prepare metadata storage")]
     PrepareStorage,
@@ -151,7 +151,7 @@ pub trait ArtifactResolver {
 }
 
 /// Identifies resolved path to stored artifact.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ResolvedArtifactPath(String);
 
 impl ResolvedArtifactPath {

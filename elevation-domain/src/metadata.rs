@@ -38,7 +38,7 @@ pub struct RasterMetadata {
 }
 
 /// Geotransform values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct GeoTransform {
     /// Longitude of the top-left origin.
     pub origin_lon: f64,
@@ -51,7 +51,7 @@ pub struct GeoTransform {
 }
 
 /// Native raster block size.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BlockSize {
     /// Block width in pixels.
     pub width: usize,

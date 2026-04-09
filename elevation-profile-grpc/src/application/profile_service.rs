@@ -24,7 +24,7 @@ pub struct SampledPointElevation {
     pub elevation: Option<f64>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ProfileService<EP> {
     elevation_provider: EP,
     max_samples: usize,

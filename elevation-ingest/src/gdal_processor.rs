@@ -26,7 +26,7 @@ impl Default for GdalProcessSettings {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum GdalProcessError {
     #[error("Failed to start gdalwarp: {0}")]
     WarpSpawn(#[source] std::io::Error),

@@ -16,7 +16,7 @@ mod routes;
 pub use error::AppError;
 
 /// Shared application state.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AppState {
     pub tile_service:
         TileService<ElevationService<FsMetadataStorage, GdalRasterReader<FsArtifactResolver>>>,

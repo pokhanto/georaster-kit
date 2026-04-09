@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Coordinate reference system identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct Crs(String);
 
 impl Crs {

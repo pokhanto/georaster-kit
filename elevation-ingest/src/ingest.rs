@@ -15,7 +15,7 @@ use tempfile::TempDir;
 use crate::gdal_processor::{GdalProcessSettings, GdalProcessor};
 
 /// Errors returned during dataset ingest.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum IngestError {
     #[error("Failed to reproject source raster.")]
     Reprojection,

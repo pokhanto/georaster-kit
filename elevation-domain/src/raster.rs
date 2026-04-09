@@ -185,7 +185,7 @@ pub enum ResolutionHint {
 }
 
 /// Errors returned by raster readers.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RasterReaderError {
     #[error("Failed to resolve path")]
     Path,

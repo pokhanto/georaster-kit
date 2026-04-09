@@ -11,7 +11,7 @@ use crate::{
 type ResponseStream =
     Pin<Box<dyn Stream<Item = Result<pb::LineStringElevationResponse, Status>> + Send>>;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ApiServer<EP> {
     profile_service: Arc<ProfileService<EP>>,
     sample_step_meters: f64,

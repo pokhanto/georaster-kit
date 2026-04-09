@@ -24,7 +24,7 @@ pub struct TilesStreamRequest {
 }
 
 /// HTTP response for tile.
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone)]
 pub struct TileResponse {
     id: String,
     elevation: Option<f64>,
@@ -39,7 +39,7 @@ impl From<Tile> for TileResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(tag = "type")]
 enum ServerEvent {
     Tile(TileResponse),
