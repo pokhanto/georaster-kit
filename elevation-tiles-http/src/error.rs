@@ -16,6 +16,8 @@ pub struct ErrorResponse {
 
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
+    #[error("Invalid bounds")]
+    InvalidBounds,
     #[error("Invalid zoom level")]
     InvalidZoomLevel,
     #[error("Tile not found")]
@@ -40,6 +42,7 @@ impl From<TileServiceError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
+            AppError::InvalidBounds => (StatusCode::BAD_REQUEST, "Invalid bounds."),
             AppError::InvalidZoomLevel => (StatusCode::BAD_REQUEST, "Invalid zoom level."),
             AppError::TileNotFound => (StatusCode::NOT_FOUND, "Tile not found."),
             AppError::ResolveTiles => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error."),

@@ -1,6 +1,5 @@
 //! Spatial primitives and small geometry-related helpers.
 
-use geo::{LineString, Polygon, Rect};
 use serde::{Deserialize, Serialize};
 
 /// Coordinate reference system identifier.
@@ -8,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct Crs(String);
 
 impl Crs {
-    // TODO: probalby need some validation
+    // TODO: need some validation for CRS
     /// Creates new CRS value.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
@@ -32,20 +31,11 @@ impl std::fmt::Display for Crs {
     }
 }
 
-/// Hint used to select an output raster resolution.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ResolutionHint {
-    /// Use highest available resolution.
-    Highest,
-    /// Use lowest available resolution.
-    Lowest,
-    /// Use explicit target resolution in degrees.
-    Degrees {
-        /// Target longitudinal resolution.
-        lon_resolution: f64,
-        /// Target latitudinal resolution.
-        lat_resolution: f64,
-    },
+/// Errors returned when building bounds.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum BoundsCreateError {
+    #[error("Invalid bounds constraints")]
+    InvalidConstraints,
 }
 
 // TODO: add constructor to validate proper bounds
@@ -53,16 +43,51 @@ pub enum ResolutionHint {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Bounds {
     /// Minimum longitude.
-    pub min_lon: f64,
+    min_lon: f64,
     /// Minimum latitude.
-    pub min_lat: f64,
+    min_lat: f64,
     /// Maximum longitude.
-    pub max_lon: f64,
+    max_lon: f64,
     /// Maximum latitude.
-    pub max_lat: f64,
+    max_lat: f64,
 }
 
 impl Bounds {
+    /// Cretes new Bounds, None if Bounds is not valid
+    pub fn new(
+        min_lon: f64,
+        min_lat: f64,
+        max_lon: f64,
+        max_lat: f64,
+    ) -> Result<Self, BoundsCreateError> {
+        if min_lon < max_lon && min_lat < max_lat {
+            Ok(Self {
+                min_lon,
+                min_lat,
+                max_lon,
+                max_lat,
+            })
+        } else {
+            Err(BoundsCreateError::InvalidConstraints)
+        }
+    }
+
+    pub fn min_lon(&self) -> f64 {
+        self.min_lon
+    }
+
+    pub fn min_lat(&self) -> f64 {
+        self.min_lat
+    }
+
+    pub fn max_lon(&self) -> f64 {
+        self.max_lon
+    }
+
+    pub fn max_lat(&self) -> f64 {
+        self.max_lat
+    }
+
     /// Returns intersection of two bounding boxes, if any.
     pub fn intersection(&self, other: &Bounds) -> Option<Bounds> {
         let min_lon = self.min_lon.max(other.min_lon);
@@ -70,7 +95,7 @@ impl Bounds {
         let max_lon = self.max_lon.min(other.max_lon);
         let max_lat = self.max_lat.min(other.max_lat);
 
-        if min_lon <= max_lon && min_lat <= max_lat {
+        if min_lon < max_lon && min_lat < max_lat {
             Some(Bounds {
                 min_lon,
                 min_lat,
@@ -88,9 +113,9 @@ impl Bounds {
     }
 }
 
-impl From<Bounds> for Polygon<f64> {
+impl From<Bounds> for geo::Polygon<f64> {
     fn from(value: Bounds) -> Self {
-        let exterior = LineString::from(vec![
+        let exterior = geo::LineString::from(vec![
             (value.min_lon, value.min_lat),
             (value.max_lon, value.min_lat),
             (value.max_lon, value.max_lat),
@@ -98,12 +123,12 @@ impl From<Bounds> for Polygon<f64> {
             (value.min_lon, value.min_lat),
         ]);
 
-        Polygon::new(exterior, vec![])
+        geo::Polygon::new(exterior, vec![])
     }
 }
 
-impl From<Rect> for Bounds {
-    fn from(value: Rect) -> Self {
+impl From<geo::Rect> for Bounds {
+    fn from(value: geo::Rect) -> Self {
         Self {
             min_lon: value.min().x,
             min_lat: value.min().y,
@@ -113,9 +138,9 @@ impl From<Rect> for Bounds {
     }
 }
 
-impl From<Bounds> for Rect<f64> {
+impl From<Bounds> for geo::Rect<f64> {
     fn from(value: Bounds) -> Self {
-        Rect::new(
+        geo::Rect::new(
             geo::Coord {
                 x: value.min_lon,
                 y: value.min_lat,

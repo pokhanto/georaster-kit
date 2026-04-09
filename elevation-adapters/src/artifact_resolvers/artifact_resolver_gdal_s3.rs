@@ -1,4 +1,6 @@
-use elevation_domain::{ArtifactLocator, ArtifactResolveError, ArtifactResolver};
+use elevation_domain::{
+    ArtifactLocator, ArtifactResolveError, ArtifactResolver, ResolvedArtifactPath,
+};
 
 /// Resolves `s3://...` locators into GDAL `/vsis3/...` paths.
 /// Uses (GDAL Virtual file system)[https://gdal.org/en/stable/user/virtual_file_systems.html]
@@ -6,7 +8,10 @@ use elevation_domain::{ArtifactLocator, ArtifactResolveError, ArtifactResolver};
 pub struct GdalS3ArtifactResolver;
 
 impl ArtifactResolver for GdalS3ArtifactResolver {
-    fn resolve(&self, locator: &ArtifactLocator) -> Result<String, ArtifactResolveError> {
+    fn resolve(
+        &self,
+        locator: &ArtifactLocator,
+    ) -> Result<ResolvedArtifactPath, ArtifactResolveError> {
         let raw = locator.as_ref();
 
         let rest = raw
@@ -17,6 +22,6 @@ impl ArtifactResolver for GdalS3ArtifactResolver {
             return Err(ArtifactResolveError::UnsupportedLocator(raw.to_string()));
         }
 
-        Ok(format!("/vsis3/{rest}"))
+        Ok(ResolvedArtifactPath::new(format!("/vsis3/{rest}")))
     }
 }

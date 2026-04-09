@@ -14,12 +14,7 @@ use tokio::runtime::Runtime;
 fn bench_elevations_in_bbox(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
     // bounds to request, changing will affect result
-    let bbox = Bounds {
-        min_lon: 30.0,
-        min_lat: 50.0,
-        max_lon: 30.3,
-        max_lat: 50.3,
-    };
+    let bbox = Bounds::new(30.0, 50.0, 30.3, 50.3).unwrap();
     // resolution hint to request, changing will affect result
     let resolution_hint = ResolutionHint::Degrees {
         lon_resolution: 0.0005,
@@ -104,7 +99,8 @@ impl RasterReader<f64> for FakeRasterReader {
             10.0
         };
 
-        let len = raster_window.target_size.width() * raster_window.target_size.height();
+        let target_size = raster_window.target_size();
+        let len = target_size.width() * target_size.height();
         let values = vec![fill_value; len];
 
         RasterWindowData::try_new(raster_window, values).map_err(|_| RasterReaderError::Read)
@@ -141,12 +137,13 @@ fn make_datasets(
         datasets.push(fake_dataset(
             &format!("artifact-{i}"),
             "artifact",
-            Bounds {
-                min_lon: 100.0 + i as f64,
-                min_lat: 100.0 + i as f64,
-                max_lon: 101.0 + i as f64,
-                max_lat: 101.0 + i as f64,
-            },
+            Bounds::new(
+                100.0 + i as f64,
+                100.0 + i as f64,
+                101.0 + i as f64,
+                101.0 + i as f64,
+            )
+            .unwrap(),
             0.01,
             256,
             256,
@@ -172,8 +169,8 @@ fn fake_dataset(
             width,
             height,
             geo_transform: GeoTransform {
-                origin_lon: bounds.min_lon,
-                origin_lat: bounds.max_lat,
+                origin_lon: bounds.min_lon(),
+                origin_lat: bounds.max_lat(),
                 pixel_width: pixel_size,
                 pixel_height: -pixel_size,
             },

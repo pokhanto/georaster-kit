@@ -6,7 +6,7 @@ use crate::spatial::{Bounds, Crs};
 use crate::storage::ArtifactLocator;
 
 /// Stored metadata for dataset.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatasetMetadata {
     /// Dataset identifier.
     pub dataset_id: String,
@@ -17,7 +17,7 @@ pub struct DatasetMetadata {
 }
 
 /// Raster metadata required for reading and serving elevations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RasterMetadata {
     /// Raster coordinate reference system.
     pub crs: Crs,
@@ -38,7 +38,7 @@ pub struct RasterMetadata {
 }
 
 /// Geotransform values.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeoTransform {
     /// Longitude of the top-left origin.
     pub origin_lon: f64,
@@ -51,7 +51,7 @@ pub struct GeoTransform {
 }
 
 /// Native raster block size.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlockSize {
     /// Block width in pixels.
     pub width: usize,

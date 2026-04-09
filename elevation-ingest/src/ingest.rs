@@ -81,6 +81,11 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestError> 
 
     tracing::info!("metadata extraction completed");
 
+    let bounds = Bounds::new(min_lon, min_lat, max_lon, max_lat).map_err(|err| {
+        tracing::error!(error = %err, min_lon, min_lat, max_lon, max_lat, "provided bounds are not valid");
+        IngestError::MetadataExtraction
+    })?;
+
     Ok(RasterMetadata {
         crs,
         width,
@@ -91,12 +96,7 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestError> 
             pixel_width: geo_transform[1],
             pixel_height: geo_transform[5],
         },
-        bounds: Bounds {
-            min_lon,
-            min_lat,
-            max_lon,
-            max_lat,
-        },
+        bounds,
         nodata,
         block_size: BlockSize {
             width: block_width,

@@ -88,13 +88,17 @@ pub async fn stream_tiles(
     Query(request): Query<TilesStreamRequest>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, AppError> {
     tracing::info!("starting handling tiles stream");
-    let zoom = request.zoom;
-    let bbox = Bounds {
-        min_lon: request.min_lon,
-        min_lat: request.min_lat,
-        max_lon: request.max_lon,
-        max_lat: request.max_lat,
-    };
+    let TilesStreamRequest {
+        zoom,
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+    } = request;
+    let bbox = Bounds::new(min_lon, min_lat, max_lon, max_lat).map_err(|err| {
+        tracing::error!(error = ?err, "invalid bbox provided in request");
+        AppError::InvalidBounds
+    })?;
 
     let tile_ids = state
         .tile_service

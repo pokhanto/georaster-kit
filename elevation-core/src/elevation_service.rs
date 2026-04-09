@@ -1,6 +1,6 @@
 use elevation_domain::{
-    BboxElevations, Bounds, DatasetMetadata, Elevation, MetadataStorage, Placement,
-    RasterReadWindow, RasterReader, RasterSize, ResolutionHint,
+    BboxElevations, Bounds, DatasetMetadata, Elevation, MetadataStorage, RasterReadWindow,
+    RasterReader, RasterSize, ResolutionHint, WindowPlacement,
 };
 
 // TODO: Add more error variants
@@ -200,12 +200,7 @@ where
     ///
     /// ```ignore
     /// let elevations = service.elevations_in_bbox(
-    ///     Bounds {
-    ///         min_lon: 30.0,
-    ///         min_lat: 50.0,
-    ///         max_lon: 31.0,
-    ///         max_lat: 51.0,
-    ///     },
+    ///     Bounds::new(30.0, 50.0, 31.0 51.0),
     ///     Some(ResolutionHint::Highest),
     /// )?;
     ///
@@ -281,8 +276,8 @@ where
             } => (lon_resolution, lat_resolution),
         };
 
-        let width = ((bbox.max_lon - bbox.min_lon) / resolution_degrees.0).ceil() as usize;
-        let height = ((bbox.max_lat - bbox.min_lat) / resolution_degrees.1).ceil() as usize;
+        let width = ((bbox.max_lon() - bbox.min_lon()) / resolution_degrees.0).ceil() as usize;
+        let height = ((bbox.max_lat() - bbox.min_lat()) / resolution_degrees.1).ceil() as usize;
 
         let mut values = vec![None; width * height];
         let mut covered = vec![0_u8; width * height];
@@ -304,8 +299,8 @@ where
                 create_raster_processing_plan(&intersection, &bbox, &dataset, width, height)
                     .ok_or(ElevationServiceError::Metadata)?;
 
-            let target_width = raster_read_window.target_size.width();
-            let target_height = raster_read_window.target_size.height();
+            let target_width = raster_read_window.target_size().width();
+            let target_height = raster_read_window.target_size().height();
             let target_base_col = target_placement.column();
             let target_base_row = target_placement.row();
 
@@ -430,7 +425,11 @@ fn get_dataset_for_point(
 ///
 /// Returns `None` if calculated coordinate is non finite or falls outside
 /// raster bounds.
-fn lonlat_to_raster_coord(metadata: &DatasetMetadata, lon: f64, lat: f64) -> Option<Placement> {
+fn lonlat_to_raster_coord(
+    metadata: &DatasetMetadata,
+    lon: f64,
+    lat: f64,
+) -> Option<WindowPlacement> {
     let gt = &metadata.raster.geo_transform;
 
     let col = ((lon - gt.origin_lon) / gt.pixel_width).floor().abs();
@@ -473,7 +472,7 @@ fn lonlat_to_raster_coord(metadata: &DatasetMetadata, lon: f64, lat: f64) -> Opt
         return None;
     }
 
-    Some(Placement::new(col, row))
+    Some(WindowPlacement::new(col, row))
 }
 
 /// Builds raster read window and target placement for an intersecting bbox.
@@ -485,7 +484,7 @@ fn create_raster_processing_plan(
     dataset: &DatasetMetadata,
     final_width: usize,
     final_height: usize,
-) -> Option<(RasterReadWindow, Placement)> {
+) -> Option<(RasterReadWindow, WindowPlacement)> {
     if final_width == 0 || final_height == 0 {
         return None;
     }
@@ -493,20 +492,20 @@ fn create_raster_processing_plan(
     let gt = &dataset.raster.geo_transform;
 
     // compute destination grid resolution in geographic units
-    let lon_step = (requested_bbox.max_lon - requested_bbox.min_lon) / final_width as f64;
-    let lat_step = (requested_bbox.max_lat - requested_bbox.min_lat) / final_height as f64;
+    let lon_step = (requested_bbox.max_lon() - requested_bbox.min_lon()) / final_width as f64;
+    let lat_step = (requested_bbox.max_lat() - requested_bbox.min_lat()) / final_height as f64;
 
     // map intersection bounds into source raster column range
     let source_start_col =
-        ((intersection.min_lon - gt.origin_lon) / gt.pixel_width).floor() as isize;
+        ((intersection.min_lon() - gt.origin_lon) / gt.pixel_width).floor() as isize;
     let source_end_col_exclusive =
-        ((intersection.max_lon - gt.origin_lon) / gt.pixel_width).ceil() as isize;
+        ((intersection.max_lon() - gt.origin_lon) / gt.pixel_width).ceil() as isize;
 
     // map intersection bounds into source raster column range
     let source_start_row =
-        ((gt.origin_lat - intersection.max_lat) / gt.pixel_height.abs()).floor() as isize;
+        ((gt.origin_lat - intersection.max_lat()) / gt.pixel_height.abs()).floor() as isize;
     let source_end_row_exclusive =
-        ((gt.origin_lat - intersection.min_lat) / gt.pixel_height.abs()).ceil() as isize;
+        ((gt.origin_lat - intersection.min_lat()) / gt.pixel_height.abs()).ceil() as isize;
 
     if source_start_col < 0
         || source_start_row < 0
@@ -535,14 +534,14 @@ fn create_raster_processing_plan(
 
     // map intersection in destination result grid
     let target_start_col =
-        ((intersection.min_lon - requested_bbox.min_lon) / lon_step).floor() as isize;
+        ((intersection.min_lon() - requested_bbox.min_lon()) / lon_step).floor() as isize;
     let target_end_col_exclusive =
-        ((intersection.max_lon - requested_bbox.min_lon) / lon_step).ceil() as isize;
+        ((intersection.max_lon() - requested_bbox.min_lon()) / lon_step).ceil() as isize;
 
     let target_start_row =
-        ((requested_bbox.max_lat - intersection.max_lat) / lat_step).floor() as isize;
+        ((requested_bbox.max_lat() - intersection.max_lat()) / lat_step).floor() as isize;
     let target_end_row_exclusive =
-        ((requested_bbox.max_lat - intersection.min_lat) / lat_step).ceil() as isize;
+        ((requested_bbox.max_lat() - intersection.min_lat()) / lat_step).ceil() as isize;
 
     if target_start_col < 0
         || target_start_row < 0
@@ -564,7 +563,7 @@ fn create_raster_processing_plan(
     }
 
     // build source raster window and destination placement
-    let placement = Placement::new(source_start_col, source_start_row);
+    let placement = WindowPlacement::new(source_start_col, source_start_row);
     let source_size = RasterSize::new(
         source_end_col_exclusive - source_start_col,
         source_end_row_exclusive - source_start_row,
@@ -574,7 +573,7 @@ fn create_raster_processing_plan(
         target_end_row_exclusive - target_start_row,
     );
 
-    let target_placement = Placement::new(target_start_col, target_start_row);
+    let target_placement = WindowPlacement::new(target_start_col, target_start_row);
 
     Some((
         RasterReadWindow::new(placement, source_size, target_size),
@@ -602,7 +601,7 @@ mod tests {
     impl MetadataStorage for FakeMetadataStorage {
         async fn load_metadata(&self) -> Result<Vec<DatasetMetadata>, MetadataStorageError> {
             if self.should_fail {
-                return Err(MetadataStorageError::Other("metadata error".into()));
+                return Err(MetadataStorageError::Load);
             }
 
             Ok(self.datasets.clone())
@@ -681,12 +680,13 @@ mod tests {
             artifact_path: ArtifactLocator::new(artifact_path),
             raster: RasterMetadata {
                 bounds,
-                width: ((bounds.max_lon - bounds.min_lon) / pixel_width.abs()).ceil() as usize,
-                height: ((bounds.max_lat - bounds.min_lat) / pixel_height.abs()).ceil() as usize,
+                width: ((bounds.max_lon() - bounds.min_lon()) / pixel_width.abs()).ceil() as usize,
+                height: ((bounds.max_lat() - bounds.min_lat()) / pixel_height.abs()).ceil()
+                    as usize,
                 nodata,
                 geo_transform: GeoTransform {
-                    origin_lon: bounds.min_lon,
-                    origin_lat: bounds.max_lat,
+                    origin_lon: bounds.min_lon(),
+                    origin_lat: bounds.max_lat(),
                     pixel_width,
                     pixel_height,
                 },
@@ -708,12 +708,7 @@ mod tests {
     }
 
     fn bbox(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Bounds {
-        Bounds {
-            min_lon,
-            min_lat,
-            max_lon,
-            max_lat,
-        }
+        Bounds::new(min_lon, min_lat, max_lon, max_lat).unwrap()
     }
 
     #[tokio::test]
@@ -763,7 +758,7 @@ mod tests {
         };
 
         let raster_read_window = RasterReadWindow::new(
-            Placement::new(0, 0),
+            WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
         );
@@ -836,13 +831,13 @@ mod tests {
         };
 
         let left_raster_read_window = RasterReadWindow::new(
-            Placement::new(0, 0),
+            WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
         );
 
         let right_raster_read_window = RasterReadWindow::new(
-            Placement::new(0, 0),
+            WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
         );
@@ -914,13 +909,13 @@ mod tests {
         };
 
         let low_raster_read_window = RasterReadWindow::new(
-            Placement::new(0, 0),
+            WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
         );
 
         let high_raster_read_window = RasterReadWindow::new(
-            Placement::new(0, 0),
+            WindowPlacement::new(0, 0),
             RasterSize::new(1, 1),
             RasterSize::new(1, 1),
         );
@@ -979,7 +974,7 @@ mod tests {
             should_fail: false,
         };
 
-        let placement = Placement::new(0, 0);
+        let placement = WindowPlacement::new(0, 0);
 
         let low_raster_read_window =
             RasterReadWindow::new(placement, RasterSize::new(2, 2), RasterSize::new(4, 4));
@@ -1049,7 +1044,7 @@ mod tests {
             should_fail: false,
         };
 
-        let placement = Placement::new(0, 0);
+        let placement = WindowPlacement::new(0, 0);
 
         let low_raster_read_window =
             RasterReadWindow::new(placement, RasterSize::new(2, 2), RasterSize::new(2, 2));
@@ -1111,12 +1106,12 @@ mod tests {
             should_fail: false,
         };
 
-        let placement = Placement::new(3, 5);
+        let placement = WindowPlacement::new(3, 5);
         let source_size = RasterSize::new(1, 3);
         let target_size = RasterSize::new(1, 3);
         let left_raster_read_window = RasterReadWindow::new(placement, source_size, target_size);
 
-        let placement = Placement::new(0, 2);
+        let placement = WindowPlacement::new(0, 2);
         let source_size = RasterSize::new(1, 2);
         let target_size = RasterSize::new(2, 3);
         let right_raster_read_window = RasterReadWindow::new(placement, source_size, target_size);

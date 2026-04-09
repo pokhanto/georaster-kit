@@ -11,15 +11,15 @@ pub use metadata::{BlockSize, DatasetMetadata, GeoTransform, RasterMetadata};
 
 mod raster;
 pub use raster::{
-    Placement, RasterReadWindow, RasterReader, RasterReaderError, RasterSize, RasterWindowData,
-    RasterWindowDataError,
+    RasterReadWindow, RasterReader, RasterReaderError, RasterSize, RasterWindowData,
+    RasterWindowDataError, ResolutionHint, WindowPlacement,
 };
 
 mod spatial;
-pub use spatial::{Bounds, Crs, ResolutionHint};
+pub use spatial::{Bounds, BoundsCreateError, Crs};
 
 mod storage;
 pub use storage::{
     ArtifactLocator, ArtifactResolveError, ArtifactResolver, ArtifactStorage, ArtifactStorageError,
-    MetadataStorage, MetadataStorageError,
+    MetadataStorage, MetadataStorageError, ResolvedArtifactPath,
 };

@@ -101,10 +101,10 @@ where
         skip(self),
         fields(
             zoom_level,
-            min_lon = bbox.min_lon,
-            min_lat = bbox.min_lat,
-            max_lon = bbox.max_lon,
-            max_lat = bbox.max_lat,
+            min_lon = bbox.min_lon(),
+            min_lat = bbox.min_lat(),
+            max_lon = bbox.max_lon(),
+            max_lat = bbox.max_lat(),
         )
     )]
     pub fn get_tile_ids_for_bbox(
@@ -156,12 +156,7 @@ mod tests {
         fn ok(values: Vec<Option<Elevation>>) -> Self {
             Self {
                 result: Ok(BboxElevations {
-                    bbox: Bounds {
-                        min_lon: 11.1,
-                        min_lat: 11.1,
-                        max_lon: 11.1,
-                        max_lat: 11.1,
-                    },
+                    bbox: Bounds::new(11.1, 11.1, 11.1, 11.1).unwrap(),
                     width: 11,
                     height: 11,
                     values,
@@ -198,12 +193,7 @@ mod tests {
     }
 
     fn valid_bbox() -> Bounds {
-        Bounds {
-            min_lon: 36.20,
-            min_lat: 49.96,
-            max_lon: 36.30,
-            max_lat: 50.02,
-        }
+        Bounds::new(36.20, 49.96, 36.30, 50.02).unwrap()
     }
 
     #[tokio::test]
@@ -269,8 +259,8 @@ mod tests {
         assert_eq!(calls.len(), 1);
 
         let bbox = calls[0].0;
-        assert!(bbox.min_lon < bbox.max_lon);
-        assert!(bbox.min_lat < bbox.max_lat);
+        assert!(bbox.min_lon() < bbox.max_lon());
+        assert!(bbox.min_lat() < bbox.max_lat());
     }
 
     #[test]

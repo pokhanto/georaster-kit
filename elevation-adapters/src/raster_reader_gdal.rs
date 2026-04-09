@@ -36,10 +36,10 @@ where
         raster_window: RasterReadWindow,
     ) -> Result<RasterWindowData<f64>, RasterReaderError> {
         let path = self.artifact_resolver.resolve(path).unwrap();
-        tracing::info!(path, "resolved artifact path");
+        tracing::info!(path = %path, "resolved artifact path");
 
         tokio::task::spawn_blocking(move || {
-            let dataset = Dataset::open(&path).map_err(|err| {
+            let dataset = Dataset::open(path.as_ref()).map_err(|err| {
                 tracing::debug!(
                     error = %err,
                     path = %path,
@@ -60,11 +60,9 @@ where
                     RasterReaderError::Read
                 })?;
 
-            let RasterReadWindow {
-                placement,
-                source_size,
-                target_size,
-            } = raster_window;
+            let placement = raster_window.placement();
+            let source_size = raster_window.source_size();
+            let target_size = raster_window.target_size();
 
             let buffer = band
                 .read_as::<f64>(

@@ -22,9 +22,6 @@ pub enum MetadataStorageError {
 
     #[error("Metadata with Id already exists")]
     DuplicateId,
-
-    #[error("Unknown error")]
-    Other(String),
 }
 
 /// Persists dataset metadata.
@@ -43,7 +40,7 @@ pub trait MetadataStorage {
     fn save_metadata(
         &self,
         metadata: DatasetMetadata,
-    ) -> impl Future<Output = Result<(), MetadataStorageError>> + Send;
+    ) -> impl Future<Output = Result<(), MetadataStorageError>>;
 
     /// Loads all known dataset metadata records.
     ///
@@ -122,6 +119,12 @@ impl From<PathBuf> for ArtifactLocator {
     }
 }
 
+impl From<&Path> for ArtifactLocator {
+    fn from(value: &Path) -> Self {
+        Self::new(value.to_string_lossy())
+    }
+}
+
 impl AsRef<str> for ArtifactLocator {
     fn as_ref(&self) -> &str {
         &self.0
@@ -141,5 +144,30 @@ pub enum ArtifactResolveError {
 }
 
 pub trait ArtifactResolver {
-    fn resolve(&self, locator: &ArtifactLocator) -> Result<String, ArtifactResolveError>;
+    fn resolve(
+        &self,
+        locator: &ArtifactLocator,
+    ) -> Result<ResolvedArtifactPath, ArtifactResolveError>;
+}
+
+/// Identifies resolved path to stored artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedArtifactPath(String);
+
+impl ResolvedArtifactPath {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl AsRef<str> for ResolvedArtifactPath {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ResolvedArtifactPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }

@@ -38,8 +38,8 @@ async fn ingest_stores_artifact_and_metadata_for_raster_fixture() {
     assert!(metadata.raster.width > 0);
     assert!(metadata.raster.height > 0);
 
-    assert!(metadata.raster.bounds.min_lon < metadata.raster.bounds.max_lon);
-    assert!(metadata.raster.bounds.min_lat < metadata.raster.bounds.max_lat);
+    assert!(metadata.raster.bounds.min_lon() < metadata.raster.bounds.max_lon());
+    assert!(metadata.raster.bounds.min_lat() < metadata.raster.bounds.max_lat());
 
     assert!(!metadata.artifact_path.as_ref().is_empty());
 

@@ -2,14 +2,14 @@
 
 use crate::storage::ArtifactLocator;
 
-/// Position of window origin inside raster.
+/// Position of window inside raster.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Placement {
+pub struct WindowPlacement {
     column: usize,
     row: usize,
 }
 
-impl Placement {
+impl WindowPlacement {
     /// Creates new placement.
     pub fn new(column: usize, row: usize) -> Self {
         Self { column, row }
@@ -62,16 +62,20 @@ impl RasterSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RasterReadWindow {
     /// Placement of window inside source raster.
-    pub placement: Placement,
+    placement: WindowPlacement,
     /// Size of source window.
-    pub source_size: RasterSize,
+    source_size: RasterSize,
     /// Size of returned target data.
-    pub target_size: RasterSize,
+    target_size: RasterSize,
 }
 
 impl RasterReadWindow {
     /// Creates new raster read window.
-    pub fn new(placement: Placement, source_size: RasterSize, target_size: RasterSize) -> Self {
+    pub fn new(
+        placement: WindowPlacement,
+        source_size: RasterSize,
+        target_size: RasterSize,
+    ) -> Self {
         Self {
             placement,
             source_size,
@@ -80,17 +84,32 @@ impl RasterReadWindow {
     }
 
     /// Creates point read window.
-    pub fn new_point(placement: Placement) -> Self {
+    pub fn new_point(placement: WindowPlacement) -> Self {
         Self {
             placement,
             source_size: RasterSize::point(),
             target_size: RasterSize::point(),
         }
     }
+
+    /// Returns placement of window.
+    pub fn placement(&self) -> WindowPlacement {
+        self.placement
+    }
+
+    /// Returns source size of window.
+    pub fn source_size(&self) -> RasterSize {
+        self.source_size
+    }
+
+    /// Returns target size of window.
+    pub fn target_size(&self) -> RasterSize {
+        self.target_size
+    }
 }
 
 /// Errors returned when building raster window data.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RasterWindowDataError {
     #[error("values length does not match window dimensions")]
     InvalidValuesLength,
@@ -147,6 +166,22 @@ impl<T> RasterWindowData<T> {
     pub fn target_width(&self) -> usize {
         self.window.target_size.width
     }
+}
+
+/// Hint used to select an output raster resolution.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResolutionHint {
+    /// Use highest available resolution.
+    Highest,
+    /// Use lowest available resolution.
+    Lowest,
+    /// Use explicit target resolution in degrees.
+    Degrees {
+        /// Target longitudinal resolution.
+        lon_resolution: f64,
+        /// Target latitudinal resolution.
+        lat_resolution: f64,
+    },
 }
 
 /// Errors returned by raster readers.
