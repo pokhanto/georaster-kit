@@ -5,11 +5,11 @@ edition = "2024"
 
 [dependencies]
 elevation-domain = { path = "../elevation-domain" }
-tracing = "0.1.44"
-thiserror = "2.0.18"
+tracing = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.51.0", features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 
 [[bench]]

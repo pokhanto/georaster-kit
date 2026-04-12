@@ -5,11 +5,11 @@ edition = "2024"
 
 [dependencies]
 elevation-domain = { path = "../elevation-domain" }
-thiserror = "2.0.18"
-tracing = "0.1.44"
+tracing = { workspace = true }
+thiserror = { workspace = true }
 gdal = "0.19.0"
 tempfile = "3.27.0"
 
 [dev-dependencies]
 elevation-adapters = { path = "../elevation-adapters" }
-tokio = { version = "1.51.0", features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

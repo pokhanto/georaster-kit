@@ -7,23 +7,19 @@ edition = "2024"
 elevation-adapters = { path = "../elevation-adapters" }
 elevation-domain = { path = "../elevation-domain" }
 elevation-core = { path = "../elevation-core" }
-tokio = { version = "1.51.0", features = [
-  "macros",
-  "rt-multi-thread",
-  "signal",
-] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+serde = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tracing-subscriber = { workspace = true }
+geo = { workspace = true }
 futures = "0.3.32"
 axum = { version = "0.8.8" }
-serde = { version = "1.0.228", features = ["derive"] }
 futures-util = "0.3.32"
 tokio-stream = "0.1.18"
 tower-http = { version = "0.6.8", features = ["trace", "cors"] }
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-thiserror = "2.0.18"
 async-stream = "0.3.6"
 h3o = { version = "0.9.4", features = ["geo"] }
-geo = "0.32.0"
 rayon = "1.11.0"
 dotenvy = "0.15.7"
 moka = { version = "0.12.15", features = ["future"] }
