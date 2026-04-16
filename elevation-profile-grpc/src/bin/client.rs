@@ -2,6 +2,8 @@ pub mod pb {
     tonic::include_proto!("elevation_service");
 }
 
+use std::fs::File;
+
 use serde::Deserialize;
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
@@ -48,8 +50,7 @@ async fn streaming(
 }
 
 fn load_points_from_json(path: &str) -> Result<Vec<pb::Point>, Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(path)?;
-    let data: CoordinatesFile = serde_json::from_str(&content)?;
+    let data: CoordinatesFile = serde_json::from_reader(File::open(path)?)?;
 
     if data.coordinates.len() < 2 {
         return Err("coordinates must contain at least two points".into());

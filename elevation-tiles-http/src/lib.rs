@@ -15,11 +15,13 @@ mod routes;
 
 pub use error::AppError;
 
+pub type AppElevationService =
+    ElevationService<FsMetadataStorage, GdalRasterReader<FsArtifactResolver>>;
+
 /// Shared application state.
 #[derive(Debug, Clone)]
 pub struct AppState {
-    pub tile_service:
-        TileService<ElevationService<FsMetadataStorage, GdalRasterReader<FsArtifactResolver>>>,
+    pub tile_service: TileService<AppElevationService>,
 }
 
 /// Starts the HTTP server.

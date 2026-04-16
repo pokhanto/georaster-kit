@@ -24,8 +24,9 @@ impl ArtifactStorage for FsArtifactStorage {
     async fn save_artifact(
         &self,
         dataset_id: &str,
-        source_path: &Path,
+        source_path: impl AsRef<Path> + Send,
     ) -> Result<ArtifactLocator, ArtifactStorageError> {
+        let source_path = source_path.as_ref();
         tracing::debug!(base_dir = %self.base_dir.display(), "preparing artifact storage directory");
 
         fs::create_dir_all(&self.base_dir).await.map_err(|err| {

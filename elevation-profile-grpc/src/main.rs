@@ -8,6 +8,9 @@ use elevation_profile_grpc::{
 use std::sync::Arc;
 use tonic::transport::Server;
 
+pub type AppElevationService =
+    ElevationService<FsMetadataStorage, GdalRasterReader<GdalS3ArtifactResolver>>;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     telemetry::init_tracing();
@@ -24,11 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
-        .set_serving::<pb::elevation_server::ElevationServer<
-            ApiServer<
-                ElevationService<FsMetadataStorage, GdalRasterReader<GdalS3ArtifactResolver>>,
-            >,
-        >>()
+        .set_serving::<pb::elevation_server::ElevationServer<ApiServer<AppElevationService>>>()
         .await;
 
     tracing::info!(addr = %config.grpc_addr, "starting gRPC server");

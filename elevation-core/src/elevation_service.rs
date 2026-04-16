@@ -21,14 +21,17 @@ pub enum ElevationServiceError {
 /// Service for resolving elevations from raster data using dataset metadata.
 #[derive(Debug, Clone)]
 pub struct ElevationService<M, R> {
-    metadata: M,
-    raster: R,
+    metadata_storage: M,
+    raster_reader: R,
 }
 
 impl<M, R> ElevationService<M, R> {
     /// Creates new elevation service with metadata storage and raster reader.
-    pub fn new(metadata: M, raster: R) -> Self {
-        Self { metadata, raster }
+    pub fn new(metadata_storage: M, raster_reader: R) -> Self {
+        Self {
+            metadata_storage,
+            raster_reader,
+        }
     }
 }
 
@@ -92,7 +95,7 @@ where
         lat: f64,
     ) -> Result<Option<Elevation>, ElevationServiceError> {
         tracing::info!(lon, lat, "starting getting elevation at point");
-        let datasets = self.metadata.load_metadata().await.map_err(|err| {
+        let datasets = self.metadata_storage.load_metadata().await.map_err(|err| {
             tracing::error!(
                 error = %err,
                 lon = lon,
@@ -120,7 +123,7 @@ where
         );
 
         let elevation_data = self
-            .raster
+            .raster_reader
             .read_window(
                 &dataset.artifact_path,
                 RasterReadWindow::new_point(pixel_placement),
@@ -220,7 +223,7 @@ where
     ) -> Result<BboxElevations, ElevationServiceError> {
         tracing::info!(bbox = ?bbox, resolution_hint = ?resolution_hint, "starting getting elevations in bbox with resolution");
 
-        let datasets = self.metadata.load_metadata().await.map_err(|err| {
+        let datasets = self.metadata_storage.load_metadata().await.map_err(|err| {
             tracing::error!(
                 error = %err,
                 bbox = ?bbox,
@@ -342,7 +345,7 @@ where
             }
 
             let raster_data = self
-                .raster
+                .raster_reader
                 .read_window(&dataset.artifact_path, raster_read_window)
                 .await
                 .map_err(|err| {
@@ -466,7 +469,7 @@ fn lonlat_to_raster_coord(
     let col = col as usize;
     let row = row as usize;
 
-    if col > metadata.raster.width || row > metadata.raster.height {
+    if col >= metadata.raster.width || row >= metadata.raster.height {
         tracing::debug!(
             col,
             row,

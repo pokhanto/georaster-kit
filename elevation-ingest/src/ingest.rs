@@ -60,10 +60,9 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestError> 
     })?;
     tracing::debug!(?geo_transform, "geotransform extracted");
 
-    let min_lon = geo_transform[0];
-    let max_lat = geo_transform[3];
-    let max_lon = geo_transform[0] + width as f64 * geo_transform[1];
-    let min_lat = geo_transform[3] + height as f64 * geo_transform[5];
+    let [min_lon, pixel_width, _, min_lat, _, pixel_height] = geo_transform;
+    let max_lon = min_lon + width as f64 * pixel_width;
+    let max_lat = min_lat + height as f64 * pixel_height;
 
     let crs = get_crs(&dataset)?;
     tracing::debug!(crs = ?crs, "crs extracted");

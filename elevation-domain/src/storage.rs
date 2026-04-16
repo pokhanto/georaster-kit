@@ -80,7 +80,7 @@ pub trait ArtifactStorage {
     fn save_artifact(
         &self,
         dataset_id: &str,
-        source_path: &Path,
+        source_path: impl AsRef<Path> + Send,
     ) -> impl Future<Output = Result<ArtifactLocator, ArtifactStorageError>> + Send;
 }
 

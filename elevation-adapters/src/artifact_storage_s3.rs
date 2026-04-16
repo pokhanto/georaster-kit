@@ -15,11 +15,11 @@ pub struct S3ArtifactStorage {
 const GEOTIFF_CONTENT_TYPE: &str = "image/tiff";
 
 impl S3ArtifactStorage {
-    pub fn new<B, P>(client: Client, bucket: B, prefix: Option<P>) -> Self
-    where
-        B: Into<String>,
-        P: Into<String>,
-    {
+    pub fn new(
+        client: Client,
+        bucket: impl Into<String>,
+        prefix: Option<impl Into<String>>,
+    ) -> Self {
         Self {
             client,
             bucket: bucket.into(),
@@ -38,12 +38,13 @@ impl S3ArtifactStorage {
 }
 
 impl ArtifactStorage for S3ArtifactStorage {
-    #[tracing::instrument(skip(self), fields(dataset_id, source_path = %source_path.display()))]
+    #[tracing::instrument(skip(self, source_path), fields(dataset_id))]
     async fn save_artifact(
         &self,
         dataset_id: &str,
-        source_path: &Path,
+        source_path: impl AsRef<Path> + Send,
     ) -> Result<ArtifactLocator, ArtifactStorageError> {
+        let source_path = source_path.as_ref();
         let object_key = self.object_key(dataset_id);
 
         tracing::debug!(

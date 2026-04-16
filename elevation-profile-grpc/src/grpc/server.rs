@@ -42,21 +42,17 @@ where
 
         let coords: Vec<(f64, f64)> = request.points.into_iter().map(|p| (p.lon, p.lat)).collect();
 
-        let sampled_path = self
-            .profile_service
-            .sample_points(&coords, self.sample_step_meters)
-            .map_err(profile_error_to_status)?;
-
         let profile_service = Arc::clone(&self.profile_service);
         let (tx, rx) = mpsc::channel(128);
-        tracing::info!(
-            sample_count = sampled_path.len(),
-            "starting elevation profile stream"
-        );
         let sampled_points = self
             .profile_service
             .sample_points(&coords, self.sample_step_meters)
             .map_err(profile_error_to_status)?;
+
+        tracing::info!(
+            sample_count = sampled_points.len(),
+            "starting elevation profile stream"
+        );
 
         tokio::spawn(async move {
             for (index, (lon, lat)) in sampled_points.into_iter().enumerate() {
