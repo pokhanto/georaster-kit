@@ -87,3 +87,83 @@ impl ArtifactStorage for FsArtifactStorage {
         Ok(ArtifactLocator::from(storage_path))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn save_artifact_copies_source_file_and_returns_locator() {
+        let temp = tempdir().unwrap();
+        let source_path = temp.path().join("source.tif");
+        let base_dir = temp.path().join("artifacts");
+
+        fs::write(&source_path, b"test-geotiff-data").await.unwrap();
+
+        let storage = FsArtifactStorage::new(base_dir.clone());
+
+        let locator = storage
+            .save_artifact("dataset-1", &source_path)
+            .await
+            .unwrap();
+
+        let expected_path = base_dir.join("dataset-1.tif");
+        let saved_content = fs::read(&expected_path).await.unwrap();
+
+        assert_eq!(PathBuf::from(String::from(locator)), expected_path);
+        assert_eq!(saved_content, b"test-geotiff-data");
+    }
+
+    #[tokio::test]
+    async fn save_artifact_creates_base_directory_if_missing() {
+        let temp = tempdir().unwrap();
+        let source_path = temp.path().join("source.tif");
+        let base_dir = temp.path().join("nested").join("artifacts");
+
+        fs::write(&source_path, b"abc").await.unwrap();
+
+        let storage = FsArtifactStorage::new(base_dir.clone());
+
+        storage
+            .save_artifact("dataset-1", &source_path)
+            .await
+            .unwrap();
+
+        assert!(base_dir.exists());
+        assert!(base_dir.join("dataset-1.tif").exists());
+    }
+
+    #[tokio::test]
+    async fn save_artifact_returns_duplicate_id_when_target_already_exists() {
+        let temp = tempdir().unwrap();
+        let source_path = temp.path().join("source.tif");
+        let base_dir = temp.path().join("artifacts");
+
+        fs::write(&source_path, b"first").await.unwrap();
+
+        let storage = FsArtifactStorage::new(base_dir.clone());
+
+        storage
+            .save_artifact("dataset-1", &source_path)
+            .await
+            .unwrap();
+
+        let result = storage.save_artifact("dataset-1", &source_path).await;
+
+        assert_eq!(result.unwrap_err(), ArtifactStorageError::DuplicateId);
+    }
+
+    #[tokio::test]
+    async fn save_artifact_returns_save_when_source_file_does_not_exist() {
+        let temp = tempdir().unwrap();
+        let source_path = temp.path().join("missing.tif");
+        let base_dir = temp.path().join("artifacts");
+
+        let storage = FsArtifactStorage::new(base_dir);
+
+        let result = storage.save_artifact("dataset-1", &source_path).await;
+
+        assert_eq!(result.unwrap_err(), ArtifactStorageError::Save);
+    }
+}

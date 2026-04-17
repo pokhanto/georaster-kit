@@ -14,3 +14,18 @@ impl ArtifactResolver for FsArtifactResolver {
         Ok(ResolvedArtifactPath::new(locator.to_string()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_returns_locator_as_resolved_path() {
+        let resolver = FsArtifactResolver;
+        let locator = ArtifactLocator::new("/tmp/data/dataset.tif");
+
+        let resolved = resolver.resolve(&locator).unwrap();
+
+        assert_eq!(resolved, ResolvedArtifactPath::new("/tmp/data/dataset.tif"));
+    }
+}
