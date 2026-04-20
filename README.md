@@ -1,74 +1,96 @@
-# elevation-kit
+# georaster-kit
 
-`elevation-kit` is a toolkit for turning raw elevation rasters into structured, queryable dataset library.
+`georaster-kit` is toolkit for turning raw geospatial rasters into structured, queryable dataset library.
 
 ## Motivation
 
-Raw DEM and raster datasets are large, low-level, and inconvenient to use directly in applications. `elevation-kit` provides structured way to prepare them for runtime use and access them through consistent core service.
+Geospatial raster datasets are often large, low-level, and inconvenient to use directly in applications. `georaster-kit` provides structured way to prepare them for runtime use and access them through consistent core service.
 
 ## Main idea
 
-`elevation-kit` is a composable and extensible workspace.
+`georaster-kit` is composable and extensible workspace.
 
-Its core crates provide shared domain types, elevation query logic, and infrastructure abstractions. Runnable applications (such as `elevation-prepare-cli`, `elevation-tiles-http`, and `elevation-profile-grpc` provided as examples) compose these building blocks into user facing tools and services.
+Its core crates provide shared domain types, raster query logic, and infrastructure abstractions. Runnable applications, such as `elevation-prepare-cli`, `elevation-tiles-http`, and `elevation-profile-grpc` - are specific example compositions built on top of these core crates.
+
+## Workspace structure
+
+### Core crates
+
+- `georaster-domain` - shared domain types and traits
+- `georaster-core` - raster query and ingest logic
+- `georaster-adapters` - concrete infrastructure implementations
+
+### Example applications
+
+- `elevation-prepare-cli` - example ingest application for elevation datasets
+- `elevation-tiles-http` - example HTTP service for tile-based elevation queries
+- `elevation-profile-grpc` - example gRPC service for elevation profile queries
 
 ## Core capabilities
 
-`elevation-kit` is centered around two core workflows:
+`georaster-kit` is centered around two core workflows:
 
 ### 1. Dataset preparation
 
-Prepare raw elevation rasters for runtime use by ingesting source data, extracting metadata, and storing metadata and raster artifacts through interchangeable storage abstractions.
+Prepare raw geospatial rasters for runtime use by ingesting source data, extracting metadata, and storing metadata and raster artifacts through interchangeable storage abstractions.
 
-For example, an ingest application can be composed with file-based metadata storage and AWS S3 artifact storage:
+For example ingest application can be composed with file-based metadata storage and AWS S3 artifact storage:
 
 ```rust
-// local file system metadata storage
+use std::path::PathBuf;
+
+// Local file system metadata storage
 let metadata_dir = PathBuf::from("metadata");
-let metadata_registry_name = "registry";
+let metadata_registry_name = "registry".to_string();
 let metadata_storage = FsMetadataStorage::new(metadata_dir, metadata_registry_name);
+
 // AWS S3 artifact storage
 let aws_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
 let s3_client = Client::new(&aws_config);
-let bucket_name = "elevation_geotiffs";
+let bucket_name = "georaster-artifacts";
 let artifact_storage = S3ArtifactStorage::new(s3_client, bucket_name, None);
 
-// Ingest service 
+// Ingest service
 let target_crs = Crs::new("EPSG:4326");
 let ingest_service =
     IngestService::new(target_crs, artifact_storage, metadata_storage);
 
 let dataset_id = "unique_dataset_id";
 let source_raster_path = PathBuf::from("data/file.tif");
+
 ingest_service
-    .run(dataset_id, source_dataset_path)
+    .run(dataset_id, source_raster_path)
     .await?;
 ```
 
-### 2. Elevation querying
+### 2. Raster querying
 
 Query prepared datasets through shared core service that depends on interchangeable metadata storage and raster reader abstractions.
 
-For example, runtime service can be composed with file-based metadata storage and S3 raster reader:
+For example, runtime service can be composed with file-based metadata storage and S3-backed GDAL raster reader:
 
 ```rust
-// local file system metadata storage
+use std::path::PathBuf;
+
+// Local file system metadata storage
 let metadata_dir = PathBuf::from("metadata");
-let metadata_registry_name = "registry";
+let metadata_registry_name = "registry".to_string();
 let metadata_storage = FsMetadataStorage::new(metadata_dir, metadata_registry_name);
 
-// S3 Raster reader using GDAL vsis3
+// Raster reader using GDAL to read raster on S3
 let raster_reader = GdalRasterReader::new(GdalS3ArtifactResolver);
 
-// Elevation service
-let elevation_service = ElevationService::new(metadata_storage, raster_reader);
+// Core georaster service
+let georaster_service = GeorasterService::new(metadata_storage, raster_reader);
 
-let elevation_at_point = elevation_service.elevation_at_point(30.5234, 50.4501)?;
+let raster_value = georaster_service
+    .raster_data_at_point(30.5234, 50.4501)
+    .await?;
 ```
 
 ## GDAL
 
-Most of `elevation-kit` relies on [GDAL](https://gdal.org/) under the hood for raster access and preprocessing. GDAL is used both through Rust bindings and, in some cases, through command-line tools such as `gdalwarp` and `gdal_translate` to reproject datasets, prepare Cloud Optimized GeoTIFFs, and read raster windows efficiently.
+Most of `georaster-kit` relies on [GDAL](https://gdal.org/) under the hood for raster access and preprocessing. GDAL is used both through Rust bindings and, in some cases, through command-line tools such as `gdalwarp` and `gdal_translate` to reproject datasets, prepare Cloud Optimized GeoTIFFs, and read raster windows efficiently.
 
 ## Quick start for elevation-tiles-http as example
 
@@ -142,6 +164,10 @@ Stream tiles for bounding box:
 curl -N "http://127.0.0.1:3000/tiles/stream?min_lon=36.20&min_lat=49.96&max_lon=36.30&max_lat=50.02&zoom=10"
 ```
 
+### Demo UI for elevation-tiles-http
+
+![Elevation Tiles demo](./elevation-tiles-http/demo/demo.gif)
+
 ### Notes
 
 - Docker examples allows avoid installing GDAL locally.
@@ -150,9 +176,9 @@ curl -N "http://127.0.0.1:3000/tiles/stream?min_lon=36.20&min_lat=49.96&max_lon=
 
 ## Main runnable components, provided as examples
 
-- `elevation-prepare-cli` — prepares source datasets and writes metadata
-- `elevation-tiles-http` — serves tile-based elevation data over HTTP/SSE
-- `elevation-profile-grpc` — serves elevation profiles over gRPC
+- `elevation-prepare-cli` - prepares source datasets and writes metadata
+- `elevation-tiles-http` - serves tile-based elevation data over HTTP/SSE
+- `elevation-profile-grpc` - serves elevation profiles over gRPC
 
 ## TODO
 
