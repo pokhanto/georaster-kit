@@ -186,7 +186,7 @@ mod tests {
     use super::*;
     use georaster_domain::{
         ArtifactLocator, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform, MetadataStorage,
-        MetadataStorageError, RasterMetadata,
+        MetadataStorageError, RasterBandMetadata, RasterMetadata, RasterRepresentation,
     };
     use tempfile::tempdir;
 
@@ -195,22 +195,27 @@ mod tests {
             dataset_id: dataset_id.to_string(),
             artifact_path: ArtifactLocator::new(format!("{dataset_id}.tif")),
             raster: RasterMetadata {
-                bounds: Bounds::try_new(10.0, 20.0, 11.0, 21.0).unwrap(),
+                crs: Crs::new("EPSG:4326"),
                 width: 100,
                 height: 100,
-                nodata: None,
                 geo_transform: GeoTransform {
                     origin_lon: 10.0,
                     origin_lat: 21.0,
                     pixel_width: 0.01,
                     pixel_height: -0.01,
                 },
-                block_size: BlockSize {
-                    width: 256,
-                    height: 256,
-                },
+                bounds: Bounds::try_new(10.0, 20.0, 11.0, 21.0).unwrap(),
                 overview_count: 0,
-                crs: Crs::new("EPSG:4326"),
+                bands: vec![RasterBandMetadata {
+                    band_index: 1,
+                    nodata: None,
+                    block_size: BlockSize {
+                        width: 256,
+                        height: 256,
+                    },
+                    color_interpretation: "Gray".to_string(),
+                }],
+                raster_representation: RasterRepresentation::Grayscale,
             },
         }
     }

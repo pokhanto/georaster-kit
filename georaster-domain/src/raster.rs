@@ -1,6 +1,8 @@
 //! Raster window, raster reading, and raster payload types.
 
-use crate::{Bounds, storage::ArtifactLocator};
+use serde::{Deserialize, Serialize};
+
+use crate::storage::ArtifactLocator;
 
 /// Position of window inside raster.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -58,37 +60,42 @@ impl RasterSize {
     }
 }
 
-/// Window describing raster read operation.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RasterReadWindow {
+/// Query describing raster read operation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RasterReadQuery {
     /// Placement of window inside source raster.
     placement: WindowPlacement,
     /// Size of source window.
     source_size: RasterSize,
     /// Size of returned target data.
     target_size: RasterSize,
+    /// Bands to read
+    bands: Vec<usize>,
 }
 
-impl RasterReadWindow {
+impl RasterReadQuery {
     /// Creates new raster read window.
     pub fn new(
         placement: WindowPlacement,
         source_size: RasterSize,
         target_size: RasterSize,
+        bands: Vec<usize>,
     ) -> Self {
         Self {
             placement,
             source_size,
             target_size,
+            bands,
         }
     }
 
     /// Creates point read window.
-    pub fn new_point(placement: WindowPlacement) -> Self {
+    pub fn new_point(placement: WindowPlacement, bands: Vec<usize>) -> Self {
         Self {
             placement,
             source_size: RasterSize::point(),
             target_size: RasterSize::point(),
+            bands,
         }
     }
 
@@ -106,65 +113,169 @@ impl RasterReadWindow {
     pub fn target_size(&self) -> RasterSize {
         self.target_size
     }
+
+    /// Returns requested bands.
+    pub fn bands(&self) -> &[usize] {
+        self.bands.as_ref()
+    }
 }
 
-/// Errors returned when building raster window data.
+/// Errors returned when building raster grid data.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum RasterWindowDataError {
+pub enum RasterGridError {
     #[error("values length does not match window dimensions")]
     InvalidValuesLength,
 }
 
-/// Raster values returned for window.
+/// Grid of raster band data for single read operation.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RasterWindowData<T> {
-    window: RasterReadWindow,
-    values: Vec<T>,
+pub struct RasterGrid {
+    width: usize,
+    height: usize,
+    data: Vec<RasterBand>,
 }
 
-impl<T> RasterWindowData<T> {
-    /// Creates new raster window payload.
+/// Values for single raster band inside [`RasterGrid`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RasterBand {
+    band_index: usize,
+    data: Vec<f64>,
+}
+
+impl RasterGrid {
+    /// Creates new raster grid payload.
+    ///
+    /// Each band payload must contain exactly `target_width * target_height`
+    /// values in row-major order.
     pub fn try_new(
-        window: RasterReadWindow,
-        values: impl Into<Vec<T>>,
-    ) -> Result<Self, RasterWindowDataError> {
-        let values = values.into();
-        let target_size = window.target_size.width * window.target_size.height;
+        width: usize,
+        height: usize,
+        bands: impl Into<Vec<RasterBand>>,
+    ) -> Result<Self, RasterGridError> {
+        let bands = bands.into();
+        let expected_len = width * height;
 
-        if values.len() != target_size {
-            return Err(RasterWindowDataError::InvalidValuesLength);
+        if bands.iter().any(|band| band.data.len() != expected_len) {
+            return Err(RasterGridError::InvalidValuesLength);
         }
 
-        Ok(Self { window, values })
+        Ok(Self {
+            height,
+            width,
+            data: bands,
+        })
     }
 
-    /// Returns all values as slice.
-    pub fn values(&self) -> &[T] {
-        &self.values
+    /// Returns all band payloads.
+    pub fn bands(&self) -> &[RasterBand] {
+        &self.data
     }
 
-    /// Consumes payload and returns inner values.
-    pub fn into_values(self) -> Vec<T> {
-        self.values
+    /// Consumes payload and returns inner band data.
+    pub fn into_bands(self) -> Vec<RasterBand> {
+        self.data
     }
 
-    /// Returns value by target column and row.
-    pub fn get(&self, col: usize, row: usize) -> Option<&T> {
-        if col >= self.window.target_size.width || row >= self.window.target_size.height {
-            return None;
+    /// Returns band payload by band index.
+    pub fn band(&self, band_index: usize) -> Option<&RasterBand> {
+        self.data.iter().find(|band| band.band_index == band_index)
+    }
+
+    /// Returns grid height.
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Returns grid width.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+}
+
+impl RasterBand {
+    /// Creates new band payload.
+    pub fn new(band_index: usize, data: impl Into<Vec<f64>>) -> Self {
+        Self {
+            band_index,
+            data: data.into(),
         }
-
-        self.values.get(row * self.window.target_size.width + col)
     }
 
-    /// Returns target height.
-    pub fn target_height(&self) -> usize {
-        self.window.target_size.height
+    /// Returns band index.
+    pub fn band_index(&self) -> usize {
+        self.band_index
     }
 
-    /// Returns target width.
-    pub fn target_width(&self) -> usize {
-        self.window.target_size.width
+    /// Returns all band data as slice.
+    pub fn data(&self) -> &[f64] {
+        &self.data
+    }
+
+    /// Consumes payload and returns inner data.
+    pub fn into_data(self) -> Vec<f64> {
+        self.data
+    }
+}
+
+/// Values for single raster point across one or more bands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RasterPoint {
+    data: Vec<RasterPointBand>,
+}
+
+/// Value for one raster band at single point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RasterPointBand {
+    band_index: usize,
+    value: f64,
+}
+
+impl RasterPoint {
+    /// Creates new raster point payload.
+    pub fn new(data: impl Into<Vec<RasterPointBand>>) -> Self {
+        Self { data: data.into() }
+    }
+
+    /// Returns all band values.
+    pub fn bands(&self) -> &[RasterPointBand] {
+        &self.data
+    }
+
+    /// Consumes payload and returns inner band values.
+    pub fn into_bands(self) -> Vec<RasterPointBand> {
+        self.data
+    }
+
+    /// Returns point value for requested band.
+    pub fn band(&self, band_index: usize) -> Option<&RasterPointBand> {
+        self.data.iter().find(|band| band.band_index == band_index)
+    }
+
+    /// Returns true if point has no band values.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Returns number of bands in point payload.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
+impl RasterPointBand {
+    /// Creates new point value for band.
+    pub fn new(band_index: usize, value: f64) -> Self {
+        Self { band_index, value }
+    }
+
+    /// Returns band index.
+    pub fn band_index(&self) -> usize {
+        self.band_index
+    }
+
+    /// Returns numeric value.
+    pub fn value(&self) -> f64 {
+        self.value
     }
 }
 
@@ -186,8 +297,7 @@ pub enum RasterReaderError {
 /// This trait is used by higher-level services to fetch raster samples without
 /// depending on specific raster library or file format implementation.
 ///
-/// Generic parameter `T` represents value type returned from raster.
-pub trait RasterReader<T> {
+pub trait RasterReader {
     /// Reads raster window from artifact.
     ///
     /// Returned [`RasterWindowData`] must match requested target window
@@ -197,25 +307,24 @@ pub trait RasterReader<T> {
     fn read_window(
         &self,
         locator: &ArtifactLocator,
-        raster_window: RasterReadWindow,
-    ) -> impl Future<Output = Result<RasterWindowData<T>, RasterReaderError>> + Send;
+        raster_read_query: RasterReadQuery,
+    ) -> impl Future<Output = Result<RasterGrid, RasterReaderError>> + Send;
 }
 
-/// Raster value in the dataset's units.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RasterValue(pub f64);
+/// Band selection variants.
+pub enum BandSelection {
+    First,
+    Indexes(Vec<usize>),
+    All,
+}
 
-/// Raster data returned for a bounding box request.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BboxRasterValues {
-    /// Requested bounding box.
-    pub bbox: Bounds,
-    /// Raster width in samples.
-    pub width: usize,
-    /// Raster height in samples.
-    pub height: usize,
-    /// Raster values in row-major order.
-    pub values: Vec<Option<RasterValue>>,
+/// Colors representation of raster.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RasterRepresentation {
+    Grayscale,
+    Rgb,
+    Rgba,
+    Unknown,
 }
 
 #[cfg(test)]
@@ -247,95 +356,170 @@ mod tests {
     }
 
     #[test]
-    fn raster_read_window_returns_parts() {
+    fn raster_read_query_returns_parts() {
         let placement = WindowPlacement::new(2, 4);
         let source_size = RasterSize::new(5, 6);
         let target_size = RasterSize::new(7, 8);
+        let bands = vec![1, 3];
 
-        let window = RasterReadWindow::new(placement, source_size, target_size);
+        let query = RasterReadQuery::new(placement, source_size, target_size, bands.clone());
 
-        assert_eq!(window.placement(), placement);
-        assert_eq!(window.source_size(), source_size);
-        assert_eq!(window.target_size(), target_size);
+        assert_eq!(query.placement(), placement);
+        assert_eq!(query.source_size(), source_size);
+        assert_eq!(query.target_size(), target_size);
+        assert_eq!(query.bands(), &bands);
     }
 
     #[test]
-    fn raster_read_window_new_point_creates_one_by_one_window() {
+    fn raster_read_query_new_point_creates_one_by_one_query() {
         let placement = WindowPlacement::new(9, 11);
+        let bands = vec![2];
 
-        let window = RasterReadWindow::new_point(placement);
+        let query = RasterReadQuery::new_point(placement, bands.clone());
 
-        assert_eq!(window.placement(), placement);
-        assert_eq!(window.source_size(), RasterSize::point());
-        assert_eq!(window.target_size(), RasterSize::point());
+        assert_eq!(query.placement(), placement);
+        assert_eq!(query.source_size(), RasterSize::point());
+        assert_eq!(query.target_size(), RasterSize::point());
+        assert_eq!(query.bands(), &bands);
     }
 
     #[test]
-    fn raster_window_data_try_new_accepts_matching_values() {
-        let window = RasterReadWindow::new(
-            WindowPlacement::new(0, 0),
-            RasterSize::new(2, 2),
-            RasterSize::new(2, 3),
+    fn raster_band_returns_band_index_and_data() {
+        let band = RasterBand::new(3, vec![10.0, 11.0, 12.0]);
+
+        assert_eq!(band.band_index(), 3);
+        assert_eq!(band.data(), &[10.0, 11.0, 12.0]);
+    }
+
+    #[test]
+    fn raster_band_into_data_returns_inner_vector() {
+        let band = RasterBand::new(1, vec![42.0]);
+
+        assert_eq!(band.into_data(), vec![42.0]);
+    }
+
+    #[test]
+    fn raster_grid_try_new_accepts_matching_band_values() {
+        let grid = RasterGrid::try_new(
+            2,
+            3,
+            vec![
+                RasterBand::new(1, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+                RasterBand::new(2, vec![7.0, 8.0, 9.0, 10.0, 11.0, 12.0]),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(grid.width(), 2);
+        assert_eq!(grid.height(), 3);
+        assert_eq!(grid.bands().len(), 2);
+        assert_eq!(
+            grid.band(1).unwrap().data(),
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         );
-
-        let data = RasterWindowData::try_new(window, vec![1, 2, 3, 4, 5, 6]).unwrap();
-
-        assert_eq!(data.target_width(), 2);
-        assert_eq!(data.target_height(), 3);
-        assert_eq!(data.values(), &[1, 2, 3, 4, 5, 6]);
-    }
-
-    #[test]
-    fn raster_window_data_try_new_rejects_invalid_values() {
-        let window = RasterReadWindow::new(
-            WindowPlacement::new(0, 0),
-            RasterSize::new(2, 2),
-            RasterSize::new(2, 3),
+        assert_eq!(
+            grid.band(2).unwrap().data(),
+            &[7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
         );
-
-        let err = RasterWindowData::try_new(window, vec![1, 2, 3]).unwrap_err();
-
-        assert_eq!(err, RasterWindowDataError::InvalidValuesLength);
     }
 
     #[test]
-    fn raster_window_data_get_returns_value_by_row_major_index() {
-        let window = RasterReadWindow::new(
-            WindowPlacement::new(0, 0),
-            RasterSize::new(2, 2),
-            RasterSize::new(3, 2),
+    fn raster_grid_try_new_rejects_invalid_values_length() {
+        let err =
+            RasterGrid::try_new(2, 3, vec![RasterBand::new(1, vec![1.0, 2.0, 3.0])]).unwrap_err();
+
+        assert_eq!(err, RasterGridError::InvalidValuesLength);
+    }
+
+    #[test]
+    fn raster_grid_returns_bands() {
+        let grid = RasterGrid::try_new(
+            5,
+            6,
+            vec![
+                RasterBand::new(1, vec![0.0; 30]),
+                RasterBand::new(4, vec![1.0; 30]),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(grid.width(), 5);
+        assert_eq!(grid.height(), 6);
+        assert_eq!(grid.bands().len(), 2);
+        assert_eq!(grid.bands()[0].band_index(), 1);
+        assert_eq!(grid.bands()[1].band_index(), 4);
+    }
+
+    #[test]
+    fn raster_grid_band_returns_matching_band() {
+        let grid = RasterGrid::try_new(
+            1,
+            1,
+            vec![
+                RasterBand::new(1, vec![10.0]),
+                RasterBand::new(2, vec![20.0]),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(grid.band(1).unwrap().data(), &[10.0]);
+        assert_eq!(grid.band(2).unwrap().data(), &[20.0]);
+        assert_eq!(grid.band(3), None);
+    }
+
+    #[test]
+    fn raster_grid_into_bands_returns_inner_band_vector() {
+        let grid = RasterGrid::try_new(
+            1,
+            1,
+            vec![
+                RasterBand::new(1, vec![10.0]),
+                RasterBand::new(2, vec![20.0]),
+            ],
+        )
+        .unwrap();
+
+        let bands = grid.into_bands();
+
+        assert_eq!(bands.len(), 2);
+        assert_eq!(bands[0].band_index(), 1);
+        assert_eq!(bands[0].data(), &[10.0]);
+        assert_eq!(bands[1].band_index(), 2);
+        assert_eq!(bands[1].data(), &[20.0]);
+    }
+
+    #[test]
+    fn band_selection_first_can_be_constructed() {
+        let selection = BandSelection::First;
+        assert!(matches!(selection, BandSelection::First));
+    }
+
+    #[test]
+    fn band_selection_indexes_can_be_constructed() {
+        let selection = BandSelection::Indexes(vec![1, 2, 4]);
+
+        match selection {
+            BandSelection::Indexes(indexes) => assert_eq!(indexes, vec![1, 2, 4]),
+            _ => panic!("expected indexes selection"),
+        }
+    }
+
+    #[test]
+    fn band_selection_all_can_be_constructed() {
+        let selection = BandSelection::All;
+        assert!(matches!(selection, BandSelection::All));
+    }
+
+    #[test]
+    fn raster_representation_variants_can_be_compared() {
+        assert_eq!(
+            RasterRepresentation::Grayscale,
+            RasterRepresentation::Grayscale
         );
-
-        let data = RasterWindowData::try_new(window, vec![10, 11, 12, 20, 21, 22]).unwrap();
-
-        assert_eq!(data.get(0, 0), Some(&10));
-        assert_eq!(data.get(1, 0), Some(&11));
-        assert_eq!(data.get(2, 0), Some(&12));
-        assert_eq!(data.get(0, 1), Some(&20));
-        assert_eq!(data.get(1, 1), Some(&21));
-        assert_eq!(data.get(2, 1), Some(&22));
-    }
-
-    #[test]
-    fn raster_window_data_get_returns_none_when_out_of_bounds() {
-        let window = RasterReadWindow::new(
-            WindowPlacement::new(0, 0),
-            RasterSize::new(1, 1),
-            RasterSize::new(2, 2),
+        assert_ne!(RasterRepresentation::Rgb, RasterRepresentation::Rgba);
+        assert_ne!(
+            RasterRepresentation::Unknown,
+            RasterRepresentation::Grayscale
         );
-
-        let data = RasterWindowData::try_new(window, vec![1, 2, 3, 4]).unwrap();
-
-        assert_eq!(data.get(2, 0), None);
-        assert_eq!(data.get(0, 2), None);
-        assert_eq!(data.get(2, 2), None);
-    }
-
-    #[test]
-    fn raster_window_data_into_values_returns_inner_vector() {
-        let window = RasterReadWindow::new_point(WindowPlacement::new(0, 0));
-        let data = RasterWindowData::try_new(window, vec![42]).unwrap();
-
-        assert_eq!(data.into_values(), vec![42]);
     }
 }

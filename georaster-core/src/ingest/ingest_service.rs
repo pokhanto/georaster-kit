@@ -7,7 +7,7 @@
 use gdal::{Dataset, Metadata};
 use georaster_domain::{
     ArtifactStorage, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform, MetadataStorage,
-    RasterMetadata,
+    RasterBandMetadata, RasterMetadata, RasterRepresentation,
 };
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -183,12 +183,19 @@ fn open_dataset(path: &Path) -> Result<Dataset, IngestServiceError> {
 /// Extracts raster metadata from dataset at given path.
 #[tracing::instrument(skip_all, fields(path = %path.display()))]
 pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestServiceError> {
-    tracing::info!("starting metadata extraction");
+    tracing::info!(path = %path.display(), "starting metadata extraction");
 
     let dataset = open_dataset(path)?;
 
     let (width, height) = dataset.raster_size();
     tracing::debug!(width, height, "raster size extracted");
+
+    let band_count = dataset.raster_count();
+    tracing::debug!(band_count, "raster band count extracted");
+
+    let driver = dataset.driver();
+    let format = driver.short_name();
+    tracing::debug!(format, "dataset format extracted");
 
     let geo_transform = dataset.geo_transform().map_err(|err| {
         tracing::error!(error = %err, "failed to get geotransform");
@@ -196,53 +203,131 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestService
     })?;
     tracing::debug!(?geo_transform, "geotransform extracted");
 
-    // TODO: not north up rasters should be reprojected
-    // NOTE: this assume that raster in north up -
-    // pixel_width is positive, and pixel_height is negative
-    let [min_lon, pixel_width, _, max_lat, _, pixel_height] = geo_transform;
-    let max_lon = min_lon + width as f64 * pixel_width;
-    let min_lat = max_lat + height as f64 * pixel_height;
-
     let crs = get_crs(&dataset)?;
     tracing::debug!(crs = ?crs, "crs extracted");
 
-    let band = dataset.rasterband(1).map_err(|err| {
-        tracing::error!(error = %err, "failed to get first raster band");
-        IngestServiceError::MetadataExtraction
-    })?;
+    let bands = (1..=band_count)
+        .map(|band_index| {
+            let band = dataset.rasterband(band_index).map_err(|err| {
+                tracing::error!(error = %err, band_index, "failed to get raster band");
+                IngestServiceError::MetadataExtraction
+            })?;
 
-    let (block_width, block_height) = band.block_size();
-    tracing::debug!(block_width, block_height, "block size extracted");
+            let (block_width, block_height) = band.block_size();
+            let nodata = band.no_data_value();
+            let color_interpretation = band.color_interpretation().name();
 
-    let nodata = band.no_data_value();
-    tracing::debug!(?nodata, "nodata value extracted");
+            let overview_count = band.overview_count().unwrap_or(0);
 
-    tracing::info!("metadata extraction completed");
+            tracing::debug!(
+                band_index,
+                block_width,
+                block_height,
+                ?nodata,
+                color_interpretation,
+                overview_count,
+                "band metadata extracted"
+            );
+
+            Ok::<_, IngestServiceError>(RasterBandMetadata {
+                band_index,
+                nodata,
+                block_size: BlockSize {
+                    width: block_width,
+                    height: block_height,
+                },
+                color_interpretation,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let raster_representation = infer_raster_representation(&bands);
+
+    let overview_count = dataset
+        .rasterband(1)
+        .ok()
+        .and_then(|band| band.overview_count().ok())
+        .unwrap_or(0) as usize;
+
+    // Assumes north up, nonrotated raster:
+    // - pixel_width > 0
+    // - pixel_height < 0
+    // If this is not true, ingest should reproject/normalize first.
+    let [
+        origin_lon,
+        pixel_width,
+        rot_x,
+        origin_lat,
+        rot_y,
+        pixel_height,
+    ] = geo_transform;
+
+    if rot_x != 0.0 || rot_y != 0.0 {
+        tracing::error!(
+            rot_x,
+            rot_y,
+            "rotated/skewed rasters are not supported by this metadata extraction path"
+        );
+        return Err(IngestServiceError::MetadataExtraction);
+    }
+
+    let lon_1 = origin_lon;
+    let lon_2 = origin_lon + width as f64 * pixel_width;
+    let lat_1 = origin_lat;
+    let lat_2 = origin_lat + height as f64 * pixel_height;
+
+    let min_lon = lon_1.min(lon_2);
+    let max_lon = lon_1.max(lon_2);
+    let min_lat = lat_1.min(lat_2);
+    let max_lat = lat_1.max(lat_2);
 
     let bounds = Bounds::try_new(min_lon, min_lat, max_lon, max_lat).map_err(|err| {
-        dbg!(&err);
-        tracing::error!(error = %err, min_lon, min_lat, max_lon, max_lat, "provided bounds are not valid");
+        tracing::error!(
+            error = %err,
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+            "provided bounds are not valid"
+        );
         IngestServiceError::MetadataExtraction
     })?;
+
+    tracing::info!("metadata extraction completed");
 
     Ok(RasterMetadata {
         crs,
         width,
         height,
         geo_transform: GeoTransform {
-            origin_lon: geo_transform[0],
-            origin_lat: geo_transform[3],
-            pixel_width: geo_transform[1],
-            pixel_height: geo_transform[5],
+            origin_lon,
+            origin_lat,
+            pixel_width,
+            pixel_height,
         },
         bounds,
-        nodata,
-        block_size: BlockSize {
-            width: block_width,
-            height: block_height,
-        },
-        overview_count: 0,
+        overview_count,
+        raster_representation,
+        bands,
     })
+}
+
+/// Get raster representation based on bands.
+fn infer_raster_representation(bands: &[RasterBandMetadata]) -> RasterRepresentation {
+    let has_red = bands.iter().any(|b| b.color_interpretation == "Red");
+    let has_green = bands.iter().any(|b| b.color_interpretation == "Green");
+    let has_blue = bands.iter().any(|b| b.color_interpretation == "Blue");
+    let has_alpha = bands.iter().any(|b| b.color_interpretation == "Alpha");
+
+    if has_red && has_green && has_blue && has_alpha {
+        RasterRepresentation::Rgba
+    } else if has_red && has_green && has_blue {
+        RasterRepresentation::Rgb
+    } else if bands.len() == 1 {
+        RasterRepresentation::Grayscale
+    } else {
+        RasterRepresentation::Unknown
+    }
 }
 
 /// Returns `true` if dataset is marked as Cloud Optimized GeoTIFF.

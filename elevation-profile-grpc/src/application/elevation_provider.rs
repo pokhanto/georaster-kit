@@ -2,7 +2,7 @@
 
 use georaster_adapters::{FsMetadataStorage, GdalRasterReader, GdalS3ArtifactResolver};
 use georaster_core::{GeorasterService, GeorasterServiceError};
-use georaster_domain::RasterValue;
+use georaster_domain::{RasterPoint, RasterRepresentation};
 
 /// Error returned by [`ElevationProvider`].
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -21,7 +21,7 @@ pub trait ElevationProvider {
         &self,
         lon: f64,
         lat: f64,
-    ) -> impl Future<Output = Result<Option<RasterValue>, ElevationProviderError>> + Send;
+    ) -> impl Future<Output = Result<Option<RasterPoint>, ElevationProviderError>> + Send;
 }
 
 /// Real implementation [`ElevationProvider`] backed by [`ElevationService`].
@@ -32,8 +32,15 @@ impl ElevationProvider
         &self,
         lon: f64,
         lat: f64,
-    ) -> Result<Option<RasterValue>, ElevationProviderError> {
-        let elevations = GeorasterService::raster_data_at_point(self, lon, lat).await?;
+    ) -> Result<Option<RasterPoint>, ElevationProviderError> {
+        let elevations = GeorasterService::raster_data_at_point(
+            self,
+            lon,
+            lat,
+            georaster_domain::BandSelection::First,
+            RasterRepresentation::Grayscale,
+        )
+        .await?;
 
         Ok(elevations)
     }

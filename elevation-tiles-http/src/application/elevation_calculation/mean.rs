@@ -1,6 +1,4 @@
-use georaster_domain::RasterValue;
-
-use crate::application::elevation_calculation::ElevationCalculationStrategy;
+use crate::{application::elevation_calculation::ElevationCalculationStrategy, domain::Elevation};
 
 #[derive(Debug, Clone, Copy)]
 pub struct MeanElevationCalculationStrategy;
@@ -16,11 +14,11 @@ impl ElevationCalculationStrategy for MeanElevationCalculationStrategy {
         MeanElevationAccumulator::new()
     }
 
-    fn update(&self, state: &mut Self::State, value: RasterValue) {
+    fn update(&self, state: &mut Self::State, value: Elevation) {
         state.add(value);
     }
 
-    fn finalize(&self, state: Self::State) -> Option<RasterValue> {
+    fn finalize(&self, state: Self::State) -> Option<Elevation> {
         state.mean()
     }
 }
@@ -36,13 +34,13 @@ impl MeanElevationAccumulator {
         Self::default()
     }
 
-    pub fn add(&mut self, value: RasterValue) {
+    pub fn add(&mut self, value: Elevation) {
         self.sum += value.0;
         self.count += 1;
     }
 
-    pub fn mean(&self) -> Option<RasterValue> {
-        (self.count > 0).then(|| RasterValue(self.sum / self.count as f64))
+    pub fn mean(&self) -> Option<Elevation> {
+        (self.count > 0).then(|| Elevation(self.sum / self.count as f64))
     }
 }
 
@@ -60,19 +58,19 @@ mod tests {
     #[test]
     fn mean_accumulator_returns_same_value_for_single_input() {
         let mut accumulator = MeanElevationAccumulator::new();
-        accumulator.add(RasterValue(42.0));
+        accumulator.add(Elevation(42.0));
 
-        assert_eq!(accumulator.mean(), Some(RasterValue(42.0)));
+        assert_eq!(accumulator.mean(), Some(Elevation(42.0)));
     }
 
     #[test]
     fn mean_accumulator_returns_mean_for_multiple_inputs() {
         let mut accumulator = MeanElevationAccumulator::new();
-        accumulator.add(RasterValue(10.0));
-        accumulator.add(RasterValue(20.0));
-        accumulator.add(RasterValue(30.0));
+        accumulator.add(Elevation(10.0));
+        accumulator.add(Elevation(20.0));
+        accumulator.add(Elevation(30.0));
 
-        assert_eq!(accumulator.mean(), Some(RasterValue(20.0)));
+        assert_eq!(accumulator.mean(), Some(Elevation(20.0)));
     }
 
     #[test]
@@ -88,10 +86,10 @@ mod tests {
         let strategy = MeanElevationCalculationStrategy;
         let mut state = strategy.new_state();
 
-        strategy.update(&mut state, RasterValue(5.0));
-        strategy.update(&mut state, RasterValue(15.0));
-        strategy.update(&mut state, RasterValue(25.0));
+        strategy.update(&mut state, Elevation(5.0));
+        strategy.update(&mut state, Elevation(15.0));
+        strategy.update(&mut state, Elevation(25.0));
 
-        assert_eq!(strategy.finalize(state), Some(RasterValue(15.0)));
+        assert_eq!(strategy.finalize(state), Some(Elevation(15.0)));
     }
 }

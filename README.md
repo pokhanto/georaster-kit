@@ -71,6 +71,7 @@ For example, runtime service can be composed with file-based metadata storage an
 
 ```rust
 use std::path::PathBuf;
+use georaster_domain::{BandSelection, RasterRepresentation};
 
 // Local file system metadata storage
 let metadata_dir = PathBuf::from("metadata");
@@ -83,8 +84,13 @@ let raster_reader = GdalRasterReader::new(GdalS3ArtifactResolver);
 // Core georaster service
 let georaster_service = GeorasterService::new(metadata_storage, raster_reader);
 
-let raster_value = georaster_service
-    .raster_data_at_point(30.5234, 50.4501)
+let raster_point = georaster_service
+    .raster_data_at_point(
+        30.5234,
+        50.4501,
+        BandSelection::First,
+        RasterRepresentation::Grayscale,
+    )
     .await?;
 ```
 

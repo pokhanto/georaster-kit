@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::spatial::{Bounds, Crs};
 use crate::storage::ArtifactLocator;
+use crate::{BandSelection, RasterRepresentation};
 
 /// Stored metadata for dataset.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,25 +17,49 @@ pub struct DatasetMetadata {
     pub raster: RasterMetadata,
 }
 
-/// Raster metadata required for reading and serving data.
+/// Metadata describing a single raster band.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RasterBandMetadata {
+    /// One-based band index in the source raster dataset.
+    pub band_index: usize,
+
+    /// Optional `nodata` value for this band.
+    pub nodata: Option<f64>,
+
+    /// Internal block size of this band.
+    pub block_size: BlockSize,
+
+    /// Color interpretation for this band.
+    pub color_interpretation: String,
+}
+
+/// Metadata describing a raster dataset.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RasterMetadata {
-    /// Raster coordinate reference system.
+    /// Coordinate reference system of the raster dataset.
     pub crs: Crs,
-    /// Raster width in pixels.
+
+    /// Raster width in cells.
     pub width: usize,
-    /// Raster height in pixels.
+
+    /// Raster height in cells.
     pub height: usize,
-    /// Transform describing raster placement.
+
+    /// Affine transform describing how raster coordinates map to spatial
+    /// coordinates.
     pub geo_transform: GeoTransform,
-    /// Bounding box of raster.
+
+    /// Spatial bounds covered by the raster dataset.
     pub bounds: Bounds,
-    /// NoData value, if present.
-    pub nodata: Option<f64>,
-    /// Native block size of raster.
-    pub block_size: BlockSize,
-    /// Number of overviews available of raster.
-    pub overview_count: u32,
+
+    /// Number of overviews available for the dataset.
+    pub overview_count: usize,
+
+    /// Raster representation.
+    pub raster_representation: RasterRepresentation,
+
+    /// Per-band metadata entries.
+    pub bands: Vec<RasterBandMetadata>,
 }
 
 /// Geotransform values.
@@ -57,4 +82,31 @@ pub struct BlockSize {
     pub width: usize,
     /// Block height in pixels.
     pub height: usize,
+}
+
+impl RasterMetadata {
+    // TODO: should it be fallible?
+    pub fn resolve_band_indexes(&self, selection: &BandSelection) -> Vec<usize> {
+        match selection {
+            BandSelection::First => self
+                .bands
+                .first()
+                .map(|band| vec![band.band_index])
+                .unwrap_or_default(),
+
+            BandSelection::Indexes(indexes) => {
+                let mut resolved: Vec<usize> = indexes
+                    .iter()
+                    .copied()
+                    .filter(|idx| self.bands.iter().any(|band| band.band_index == *idx))
+                    .collect();
+
+                resolved.sort_unstable();
+                resolved.dedup();
+                resolved
+            }
+
+            BandSelection::All => self.bands.iter().map(|band| band.band_index).collect(),
+        }
+    }
 }

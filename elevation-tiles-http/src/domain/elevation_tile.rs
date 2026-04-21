@@ -1,17 +1,17 @@
 //! Tile domain model.
 
-use georaster_domain::RasterValue;
+use crate::domain::Elevation;
 
 /// Tile with aggregated elevation data.
 #[derive(Debug, Clone)]
 pub struct ElevationTile {
     id: String,
-    elevation: Option<RasterValue>,
+    elevation: Option<Elevation>,
 }
 
 impl ElevationTile {
     /// Creates a new tile.
-    pub fn new(id: String, elevation: Option<RasterValue>) -> Self {
+    pub fn new(id: String, elevation: Option<Elevation>) -> Self {
         Self { id, elevation }
     }
 
@@ -21,7 +21,7 @@ impl ElevationTile {
     }
 
     /// Returns tile elevation.
-    pub fn elevation(&self) -> Option<RasterValue> {
+    pub fn elevation(&self) -> Option<Elevation> {
         self.elevation
     }
 }

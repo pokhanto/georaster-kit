@@ -1,6 +1,7 @@
 use georaster_domain::{
-    BboxRasterValues, Bounds, DatasetMetadata, MetadataStorage, RasterReadWindow, RasterReader,
-    RasterSize, RasterValue, WindowPlacement,
+    BandSelection, Bounds, DatasetMetadata, MetadataStorage, RasterBand, RasterGrid, RasterPoint,
+    RasterPointBand, RasterReadQuery, RasterReader, RasterRepresentation, RasterSize,
+    WindowPlacement,
 };
 
 use crate::GeorasterSampling;
@@ -40,7 +41,7 @@ impl<M, R> GeorasterService<M, R> {
 impl<M, R> GeorasterService<M, R>
 where
     M: MetadataStorage,
-    R: RasterReader<f64>,
+    R: RasterReader,
 {
     /// Returns raster value at requested geographic point.
     ///
@@ -64,7 +65,7 @@ where
     ///
     /// # Returns
     ///
-    /// - `Ok(Some(RasterValue))` if a dataset contains point and a valid
+    /// - `Ok(Some(RasterPointValue))` if a dataset contains point and a valid
     ///   raster value is found.
     /// - `Ok(None)` if no dataset contains point mapped raster cell
     ///   is outside raster bounds or resulting value equals dataset
@@ -90,12 +91,14 @@ where
     ///     println!("Raster value: {}", value.0);
     /// }
     /// ```
-    #[tracing::instrument(skip(self), fields(lon, lat))]
+    #[tracing::instrument(skip(self), fields(lon, lat, band_selection, raster_representation))]
     pub async fn raster_data_at_point(
         &self,
         lon: f64,
         lat: f64,
-    ) -> Result<Option<RasterValue>, GeorasterServiceError> {
+        band_selection: BandSelection,
+        raster_representation: RasterRepresentation,
+    ) -> Result<Option<RasterPoint>, GeorasterServiceError> {
         tracing::info!(lon, lat, "starting point raster query");
 
         let datasets = self.metadata_storage.load_metadata().await.map_err(|err| {
@@ -109,7 +112,24 @@ where
             GeorasterServiceError::MetadataLoad
         })?;
 
-        let Some(dataset) = get_dataset_for_point(datasets, lon, lat) else {
+        let dataset = datasets
+            .into_iter()
+            .filter(|ds| {
+                ds.raster.raster_representation == raster_representation
+                    && ds.raster.bounds.contains_point(lon, lat)
+            })
+            .min_by(|a, b| {
+                let a_area = a.raster.geo_transform.pixel_width.abs()
+                    * a.raster.geo_transform.pixel_height.abs();
+                let b_area = b.raster.geo_transform.pixel_width.abs()
+                    * b.raster.geo_transform.pixel_height.abs();
+
+                a_area
+                    .partial_cmp(&b_area)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        let Some(dataset) = dataset else {
             tracing::debug!(lon, lat, "no dataset contains requested point");
             return Ok(None);
         };
@@ -124,12 +144,23 @@ where
             return Ok(None);
         };
 
-        let raster_window =
-            RasterReadWindow::new(placement, RasterSize::new(1, 1), RasterSize::new(1, 1));
+        let band_indexes = dataset.raster.resolve_band_indexes(&band_selection);
 
-        let raster_data = self
+        if band_indexes.is_empty() {
+            tracing::debug!(
+                dataset_id = %dataset.dataset_id,
+                lon,
+                lat,
+                "no bands resolved for point query"
+            );
+            return Ok(None);
+        }
+
+        let raster_query = RasterReadQuery::new_point(placement, band_indexes);
+
+        let raster_grid = self
             .raster_reader
-            .read_window(&dataset.artifact_path, raster_window)
+            .read_window(&dataset.artifact_path, raster_query.clone())
             .await
             .map_err(|err| {
                 tracing::error!(
@@ -138,20 +169,39 @@ where
                     artifact = %dataset.artifact_path,
                     lon,
                     lat,
-                    raster_window = ?raster_window,
+                    raster_query = ?raster_query,
                     "failed to read raster value at point"
                 );
 
                 GeorasterServiceError::RasterRead
             })?;
 
-        let value = raster_data.get(0, 0).copied();
+        let values = raster_grid
+            .into_bands()
+            .into_iter()
+            .filter_map(|band| {
+                let value = band.data().first().copied()?;
 
-        match value {
-            Some(value) if dataset.raster.nodata == Some(value) => Ok(None),
-            Some(value) => Ok(Some(RasterValue(value))),
-            None => Ok(None),
+                let nodata = dataset
+                    .raster
+                    .bands
+                    .iter()
+                    .find(|metadata_band| metadata_band.band_index == band.band_index())
+                    .and_then(|metadata_band| metadata_band.nodata);
+
+                if nodata == Some(value) {
+                    return None;
+                }
+
+                Some(RasterPointBand::new(band.band_index(), value))
+            })
+            .collect::<Vec<_>>();
+
+        if values.is_empty() {
+            return Ok(None);
         }
+
+        Ok(Some(RasterPoint::new(values)))
     }
 
     /// Returns a raster values grid for requested bounding box.
@@ -196,13 +246,22 @@ where
     ///
     /// Current implementation assumes axis-aligned rasters and uses bounding-box based
     /// processing in the same coordinate space as dataset metadata.
-    #[tracing::instrument(skip(self), fields(bbox, sampling))]
+    #[tracing::instrument(
+        skip(self),
+        fields(bbox, sampling, band_selection, raster_representation)
+    )]
     pub async fn raster_data_in_bbox(
         &self,
         bbox: Bounds,
         sampling: Option<GeorasterSampling>,
-    ) -> Result<BboxRasterValues, GeorasterServiceError> {
-        tracing::info!(bbox = ?bbox, sampling = ?sampling, "starting getting raster data in bbox with resolution");
+        band_selection: BandSelection,
+        raster_representation: RasterRepresentation,
+    ) -> Result<RasterGrid, GeorasterServiceError> {
+        tracing::info!(
+            bbox = ?bbox,
+            sampling = ?sampling,
+            "starting getting raster data in bbox with resolution"
+        );
 
         let datasets = self.metadata_storage.load_metadata().await.map_err(|err| {
             tracing::error!(
@@ -219,6 +278,10 @@ where
         let mut intersections: Vec<(DatasetMetadata, Bounds)> = datasets
             .into_iter()
             .filter_map(|dataset| {
+                if dataset.raster.raster_representation != raster_representation {
+                    return None;
+                }
+
                 dataset
                     .raster
                     .bounds
@@ -237,8 +300,6 @@ where
         let (width, height) = sampling
             .unwrap_or(GeorasterSampling::Preview)
             .bbox_dimensions(&bbox);
-        let mut values = vec![None; width * height];
-        let mut covered = vec![0_u8; width * height];
 
         // highest quality first
         intersections.sort_by(|(a, _), (b, _)| {
@@ -252,137 +313,134 @@ where
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        // build resulting bands based on resolved band indexes from first compatible dataset
+        let requested_band_indexes = intersections
+            .first()
+            .map(|(dataset, _)| dataset.raster.resolve_band_indexes(&band_selection))
+            .unwrap_or_default();
+
+        // keep intermediate merged data as Option<f64> so we can represent uncovered cells
+        let mut merged_bands: Vec<(usize, Vec<Option<f64>>)> = requested_band_indexes
+            .iter()
+            .map(|band_index| (*band_index, vec![None; width * height]))
+            .collect();
+
         for (dataset, intersection) in intersections {
-            let (raster_read_window, target_placement) =
-                create_raster_processing_plan(&intersection, &bbox, &dataset, width, height)
-                    .ok_or(GeorasterServiceError::RasterPlan)?;
+            let band_indexes = dataset.raster.resolve_band_indexes(&band_selection);
 
-            let target_width = raster_read_window.target_size().width();
-            let target_height = raster_read_window.target_size().height();
-            let target_base_col = target_placement.column();
-            let target_base_row = target_placement.row();
-
-            // skip whole intersection if its target rectangle is already fully covered
-            let mut fully_covered = true;
-            for row in 0..target_height {
-                let target_row = target_base_row + row;
-                if target_row >= height {
-                    fully_covered = false;
-                    break;
-                }
-
-                let target_row_start = target_row * width + target_base_col;
-                let target_row_end =
-                    (target_row_start + target_width).min((target_row + 1) * width);
-
-                if target_row_start >= target_row_end {
-                    fully_covered = false;
-                    break;
-                }
-
-                if covered[target_row_start..target_row_end].contains(&0) {
-                    fully_covered = false;
-                    break;
-                }
-            }
-
-            if fully_covered {
+            // skip dataset if its resolved band set does not match expected result schema
+            if band_indexes != requested_band_indexes {
                 tracing::debug!(
                     dataset_id = %dataset.dataset_id,
-                    "skipping fully covered intersection"
+                    ?band_indexes,
+                    ?requested_band_indexes,
+                    "skipping dataset with incompatible resolved band indexes"
                 );
                 continue;
             }
 
-            let raster_data = self
+            let (raster_read_query, target_placement) = create_raster_processing_plan(
+                &intersection,
+                &bbox,
+                &dataset,
+                width,
+                height,
+                band_indexes,
+            )
+            .ok_or(GeorasterServiceError::RasterPlan)?;
+
+            let target_width = raster_read_query.target_size().width();
+            let target_height = raster_read_query.target_size().height();
+            let target_base_col = target_placement.column();
+            let target_base_row = target_placement.row();
+
+            let raster_grid = self
                 .raster_reader
-                .read_window(&dataset.artifact_path, raster_read_window)
+                .read_window(&dataset.artifact_path, raster_read_query.clone())
                 .await
                 .map_err(|err| {
                     tracing::error!(
                         error = %err,
                         dataset_id = %dataset.dataset_id,
                         artifact = %dataset.artifact_path,
-                        raster_window = ?raster_read_window,
+                        raster_query = ?raster_read_query,
                         "failed to read raster window"
                     );
 
                     GeorasterServiceError::RasterRead
                 })?;
 
-            for row in 0..raster_data.target_height() {
-                let target_row = target_base_row + row;
-                if target_row >= height {
+            // merge each returned band into corresponding result band
+            for source_band in raster_grid.bands() {
+                let Some((_, target_band_values)) = merged_bands
+                    .iter_mut()
+                    .find(|(band_index, _)| *band_index == source_band.band_index())
+                else {
                     continue;
-                }
+                };
 
-                let row_start = target_row * width + target_base_col;
-                let row_end =
-                    (row_start + raster_data.target_width()).min((target_row + 1) * width);
+                // nodata is resolved per band
+                let nodata = dataset
+                    .raster
+                    .bands
+                    .iter()
+                    .find(|band| band.band_index == source_band.band_index())
+                    .and_then(|band| band.nodata);
 
-                if row_start >= row_end {
-                    continue;
-                }
-
-                // skip whole row if it is already fully covered
-                if covered[row_start..row_end].iter().all(|&cell| cell == 1) {
-                    continue;
-                }
-
-                for col in 0..raster_data.target_width() {
-                    let target_column = target_base_col + col;
-                    if target_column >= width {
+                for row in 0..target_height {
+                    let target_row = target_base_row + row;
+                    if target_row >= height {
                         continue;
                     }
 
-                    let target_index = target_row * width + target_column;
-
-                    // lower quality datasets only fill gaps
-                    if covered[target_index] == 1 {
-                        continue;
-                    }
-
-                    let raster_value = raster_data.get(col, row).copied();
-
-                    if let Some(value) = raster_value {
-                        if dataset.raster.nodata == Some(value) {
+                    for col in 0..target_width {
+                        let target_col = target_base_col + col;
+                        if target_col >= width {
                             continue;
                         }
 
-                        values[target_index] = Some(RasterValue(value));
-                        covered[target_index] = 1;
+                        let source_idx = row * target_width + col;
+                        let target_idx = target_row * width + target_col;
+
+                        let Some(value) = source_band.data().get(source_idx).copied() else {
+                            continue;
+                        };
+
+                        if nodata == Some(value) {
+                            continue;
+                        }
+
+                        // later datasets overwrite earlier ones;
+                        // because we sorted from lower quality to higher quality,
+                        // higher quality data wins
+                        target_band_values[target_idx] = Some(value);
                     }
                 }
             }
         }
 
-        Ok(BboxRasterValues {
-            bbox,
-            width,
-            height,
-            values,
+        // convert merged optional data into final raster bands
+        let bands = merged_bands
+            .into_iter()
+            .map(|(band_index, values)| {
+                let values = values
+                    .into_iter()
+                    .map(|v| v.unwrap_or_default())
+                    .collect::<Vec<_>>();
+                RasterBand::new(band_index, values)
+            })
+            .collect::<Vec<_>>();
+
+        RasterGrid::try_new(width, height, bands).map_err(|err| {
+            tracing::error!(
+                error = %err,
+                width,
+                height,
+                "failed to build resulting raster grid"
+            );
+            GeorasterServiceError::RasterRead
         })
     }
-}
-
-fn get_dataset_for_point(
-    datasets: Vec<DatasetMetadata>,
-    lon: f64,
-    lat: f64,
-) -> Option<DatasetMetadata> {
-    datasets
-        .into_iter()
-        .filter(|ds| ds.raster.bounds.contains_point(lon, lat))
-        .min_by(|a, b| {
-            let a_area = a.raster.geo_transform.pixel_width.abs()
-                * a.raster.geo_transform.pixel_height.abs();
-            let b_area = b.raster.geo_transform.pixel_width.abs()
-                * b.raster.geo_transform.pixel_height.abs();
-
-            a_area
-                .partial_cmp(&b_area)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
 }
 
 /// Converts geographic coordinate into raster column and row, based on metadata.
@@ -448,7 +506,8 @@ fn create_raster_processing_plan(
     dataset: &DatasetMetadata,
     final_width: usize,
     final_height: usize,
-) -> Option<(RasterReadWindow, WindowPlacement)> {
+    bands: Vec<usize>,
+) -> Option<(RasterReadQuery, WindowPlacement)> {
     if final_width == 0 || final_height == 0 {
         return None;
     }
@@ -540,7 +599,7 @@ fn create_raster_processing_plan(
     let target_placement = WindowPlacement::new(target_start_col, target_start_row);
 
     Some((
-        RasterReadWindow::new(placement, source_size, target_size),
+        RasterReadQuery::new(placement, source_size, target_size, bands),
         target_placement,
     ))
 }
@@ -551,8 +610,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use georaster_domain::{
-        ArtifactLocator, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform, MetadataStorage,
-        MetadataStorageError, RasterMetadata, RasterReader, RasterReaderError, RasterWindowData,
+        ArtifactLocator, BandSelection, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform,
+        MetadataStorage, MetadataStorageError, RasterBand, RasterBandMetadata, RasterGrid,
+        RasterMetadata, RasterPointBand, RasterReader, RasterReaderError, RasterRepresentation,
     };
 
     #[derive(Clone, Default)]
@@ -581,33 +641,33 @@ mod tests {
     #[derive(Debug, Clone)]
     struct FakeRasterReaderData {
         artifact_path: String,
-        window: RasterReadWindow,
-        result: RasterWindowData<f64>,
+        window: RasterReadQuery,
+        result: RasterGrid,
     }
 
     #[derive(Clone, Default)]
     struct FakeRasterReader {
-        reads: Arc<Mutex<Vec<(String, RasterReadWindow)>>>,
+        reads: Arc<Mutex<Vec<(String, RasterReadQuery)>>>,
         responses: Vec<FakeRasterReaderData>,
         should_fail: bool,
     }
 
     impl FakeRasterReader {
-        fn recorded_reads(&self) -> Vec<(String, RasterReadWindow)> {
+        fn recorded_reads(&self) -> Vec<(String, RasterReadQuery)> {
             self.reads.lock().unwrap().clone()
         }
     }
 
-    impl RasterReader<f64> for FakeRasterReader {
+    impl RasterReader for FakeRasterReader {
         async fn read_window(
             &self,
             artifact_path: &ArtifactLocator,
-            window: RasterReadWindow,
-        ) -> Result<RasterWindowData<f64>, RasterReaderError> {
+            window: RasterReadQuery,
+        ) -> Result<RasterGrid, RasterReaderError> {
             self.reads
                 .lock()
                 .unwrap()
-                .push((artifact_path.to_string(), window));
+                .push((artifact_path.to_string(), window.clone()));
 
             if self.should_fail {
                 return Err(RasterReaderError::Read);
@@ -639,36 +699,156 @@ mod tests {
             dataset_id: dataset_id.to_string(),
             artifact_path: ArtifactLocator::new(artifact_path),
             raster: RasterMetadata {
-                bounds,
+                crs: Crs::new("Test"),
                 width: ((bounds.max_lon() - bounds.min_lon()) / pixel_width.abs()).ceil() as usize,
                 height: ((bounds.max_lat() - bounds.min_lat()) / pixel_height.abs()).ceil()
                     as usize,
-                nodata,
                 geo_transform: GeoTransform {
                     origin_lon: bounds.min_lon(),
                     origin_lat: bounds.max_lat(),
                     pixel_width,
                     pixel_height,
                 },
-                block_size: BlockSize {
-                    width: 1,
-                    height: 1,
-                },
+                bounds,
                 overview_count: 0,
-                crs: Crs::new("Test"),
+                raster_representation: RasterRepresentation::Grayscale,
+                bands: vec![RasterBandMetadata {
+                    band_index: 1,
+                    nodata,
+                    block_size: BlockSize {
+                        width: 1,
+                        height: 1,
+                    },
+                    color_interpretation: "Gray".to_string(),
+                }],
             },
         }
     }
 
-    fn window_data(
-        raster_read_window: RasterReadWindow,
-        values: Vec<f64>,
-    ) -> RasterWindowData<f64> {
-        RasterWindowData::try_new(raster_read_window, values).unwrap()
+    fn grid(width: usize, height: usize, bands: Vec<RasterBand>) -> RasterGrid {
+        RasterGrid::try_new(width, height, bands).unwrap()
     }
 
     fn bbox(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Bounds {
         Bounds::try_new(min_lon, min_lat, max_lon, max_lat).unwrap()
+    }
+
+    #[tokio::test]
+    async fn raster_data_at_point_returns_none_when_no_dataset_contains_point() {
+        let metadata = FakeMetadataStorage {
+            datasets: vec![dataset(
+                "ds-1",
+                "a.tif",
+                bbox(10.0, 10.0, 12.0, 12.0),
+                1.0,
+                -1.0,
+                None,
+            )],
+            should_fail: false,
+        };
+
+        let raster = FakeRasterReader::default();
+        let service = GeorasterService::new(metadata, raster);
+
+        let result = service
+            .raster_data_at_point(
+                1.0,
+                1.0,
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn raster_data_at_point_returns_point_for_single_band() {
+        let metadata = FakeMetadataStorage {
+            datasets: vec![dataset(
+                "ds-1",
+                "a.tif",
+                bbox(0.0, 0.0, 2.0, 2.0),
+                1.0,
+                -1.0,
+                None,
+            )],
+            should_fail: false,
+        };
+
+        let raster_query = RasterReadQuery::new_point(WindowPlacement::new(1, 1), vec![1]);
+
+        let raster = FakeRasterReader {
+            responses: vec![FakeRasterReaderData {
+                artifact_path: "a.tif".to_string(),
+                window: raster_query.clone(),
+                result: grid(1, 1, vec![RasterBand::new(1, vec![42.0])]),
+            }],
+            ..Default::default()
+        };
+
+        let service = GeorasterService::new(metadata, raster.clone());
+
+        let result = service
+            .raster_data_at_point(
+                1.0,
+                1.0,
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            result,
+            RasterPoint::new(vec![RasterPointBand::new(1, 42.0)])
+        );
+        assert_eq!(
+            raster.recorded_reads(),
+            vec![("a.tif".to_string(), raster_query)]
+        );
+    }
+
+    #[tokio::test]
+    async fn raster_data_at_point_returns_none_when_value_is_nodata() {
+        let metadata = FakeMetadataStorage {
+            datasets: vec![dataset(
+                "ds-1",
+                "a.tif",
+                bbox(0.0, 0.0, 2.0, 2.0),
+                1.0,
+                -1.0,
+                Some(0.0),
+            )],
+            should_fail: false,
+        };
+
+        let raster_query = RasterReadQuery::new_point(WindowPlacement::new(1, 1), vec![1]);
+
+        let raster = FakeRasterReader {
+            responses: vec![FakeRasterReaderData {
+                artifact_path: "a.tif".to_string(),
+                window: raster_query,
+                result: grid(1, 1, vec![RasterBand::new(1, vec![0.0])]),
+            }],
+            ..Default::default()
+        };
+
+        let service = GeorasterService::new(metadata, raster);
+
+        let result = service
+            .raster_data_at_point(
+                1.0,
+                1.0,
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result, None);
     }
 
     #[tokio::test]
@@ -697,14 +877,15 @@ mod tests {
                     x_resolution: 1.0,
                     y_resolution: 1.0,
                 }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
             )
             .await
             .unwrap();
 
-        assert_eq!(result.bbox, requested_bbox);
-        assert_eq!(result.width, 2);
-        assert_eq!(result.height, 2);
-        assert_eq!(result.values, vec![None, None, None, None]);
+        assert_eq!(result.width(), 2);
+        assert_eq!(result.height(), 2);
+        assert!(result.bands().is_empty());
         assert!(raster.recorded_reads().is_empty());
     }
 
@@ -717,17 +898,18 @@ mod tests {
             should_fail: false,
         };
 
-        let raster_read_window = RasterReadWindow::new(
+        let raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
+            vec![1],
         );
 
         let raster = FakeRasterReader {
             responses: vec![FakeRasterReaderData {
                 artifact_path: "a.tif".to_string(),
-                window: raster_read_window,
-                result: window_data(raster_read_window, vec![1.0, 2.0, 3.0, 4.0]),
+                window: raster_read_query.clone(),
+                result: grid(2, 2, vec![RasterBand::new(1, vec![1.0, 2.0, 3.0, 4.0])]),
             }],
             ..Default::default()
         };
@@ -741,25 +923,19 @@ mod tests {
                     x_resolution: 1.0,
                     y_resolution: 1.0,
                 }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
             )
             .await
             .unwrap();
 
-        assert_eq!(result.bbox, requested_bbox);
-        assert_eq!(result.width, 2);
-        assert_eq!(result.height, 2);
-        assert_eq!(
-            result.values,
-            vec![
-                Some(RasterValue(1.0)),
-                Some(RasterValue(2.0)),
-                Some(RasterValue(3.0)),
-                Some(RasterValue(4.0)),
-            ]
-        );
+        assert_eq!(result.width(), 2);
+        assert_eq!(result.height(), 2);
+        assert_eq!(result.bands().len(), 1);
+        assert_eq!(result.band(1).unwrap().data(), &[1.0, 2.0, 3.0, 4.0]);
         assert_eq!(
             raster.recorded_reads(),
-            vec![("a.tif".to_string(), raster_read_window)]
+            vec![("a.tif".to_string(), raster_read_query)]
         );
     }
 
@@ -790,29 +966,31 @@ mod tests {
             should_fail: false,
         };
 
-        let left_raster_read_window = RasterReadWindow::new(
+        let left_raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
+            vec![1],
         );
 
-        let right_raster_read_window = RasterReadWindow::new(
+        let right_raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
+            vec![1],
         );
 
         let raster = FakeRasterReader {
             responses: vec![
                 FakeRasterReaderData {
                     artifact_path: "left.tif".to_string(),
-                    window: left_raster_read_window,
-                    result: window_data(left_raster_read_window, vec![10.0, 10.0, 10.0, 10.0]),
+                    window: left_raster_read_query,
+                    result: grid(2, 2, vec![RasterBand::new(1, vec![10.0, 10.0, 10.0, 10.0])]),
                 },
                 FakeRasterReaderData {
                     artifact_path: "right.tif".to_string(),
-                    window: right_raster_read_window,
-                    result: window_data(right_raster_read_window, vec![20.0, 20.0, 20.0, 20.0]),
+                    window: right_raster_read_query,
+                    result: grid(2, 2, vec![RasterBand::new(1, vec![20.0, 20.0, 20.0, 20.0])]),
                 },
             ],
             ..Default::default()
@@ -827,24 +1005,17 @@ mod tests {
                     x_resolution: 1.0,
                     y_resolution: 1.0,
                 }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
             )
             .await
             .unwrap();
 
-        assert_eq!(result.width, 4);
-        assert_eq!(result.height, 2);
+        assert_eq!(result.width(), 4);
+        assert_eq!(result.height(), 2);
         assert_eq!(
-            result.values,
-            vec![
-                Some(RasterValue(10.0)),
-                Some(RasterValue(10.0)),
-                Some(RasterValue(20.0)),
-                Some(RasterValue(20.0)),
-                Some(RasterValue(10.0)),
-                Some(RasterValue(10.0)),
-                Some(RasterValue(20.0)),
-                Some(RasterValue(20.0)),
-            ]
+            result.band(1).unwrap().data(),
+            &[10.0, 10.0, 20.0, 20.0, 10.0, 10.0, 20.0, 20.0]
         );
     }
 
@@ -868,29 +1039,31 @@ mod tests {
             should_fail: false,
         };
 
-        let low_raster_read_window = RasterReadWindow::new(
+        let low_raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 0),
             RasterSize::new(2, 2),
             RasterSize::new(2, 2),
+            vec![1],
         );
 
-        let high_raster_read_window = RasterReadWindow::new(
+        let high_raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 0),
             RasterSize::new(1, 1),
             RasterSize::new(1, 1),
+            vec![1],
         );
 
         let raster = FakeRasterReader {
             responses: vec![
                 FakeRasterReaderData {
                     artifact_path: "low.tif".to_string(),
-                    window: low_raster_read_window,
-                    result: window_data(low_raster_read_window, vec![10.0, 10.0, 10.0, 10.0]),
+                    window: low_raster_read_query,
+                    result: grid(2, 2, vec![RasterBand::new(1, vec![10.0, 10.0, 10.0, 10.0])]),
                 },
                 FakeRasterReaderData {
                     artifact_path: "high.tif".to_string(),
-                    window: high_raster_read_window,
-                    result: window_data(high_raster_read_window, vec![0.0]),
+                    window: high_raster_read_query,
+                    result: grid(1, 1, vec![RasterBand::new(1, vec![0.0])]),
                 },
             ],
             ..Default::default()
@@ -905,21 +1078,15 @@ mod tests {
                     x_resolution: 1.0,
                     y_resolution: 1.0,
                 }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
             )
             .await
             .unwrap();
 
-        assert_eq!(result.width, 2);
-        assert_eq!(result.height, 2);
-        assert_eq!(
-            result.values,
-            vec![
-                Some(RasterValue(10.0)),
-                Some(RasterValue(10.0)),
-                Some(RasterValue(10.0)),
-                Some(RasterValue(10.0)),
-            ]
-        );
+        assert_eq!(result.width(), 2);
+        assert_eq!(result.height(), 2);
+        assert_eq!(result.band(1).unwrap().data(), &[10.0, 10.0, 10.0, 10.0]);
     }
 
     #[tokio::test]
@@ -931,17 +1098,18 @@ mod tests {
             should_fail: false,
         };
 
-        let raster_read_window = RasterReadWindow::new(
+        let raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 0),
             RasterSize::new(4, 4),
             RasterSize::new(2, 2),
+            vec![1],
         );
 
         let raster = FakeRasterReader {
             responses: vec![FakeRasterReaderData {
                 artifact_path: "a.tif".to_string(),
-                window: raster_read_window,
-                result: window_data(raster_read_window, vec![1.0, 2.0, 3.0, 4.0]),
+                window: raster_read_query,
+                result: grid(2, 2, vec![RasterBand::new(1, vec![1.0, 2.0, 3.0, 4.0])]),
             }],
             ..Default::default()
         };
@@ -955,21 +1123,15 @@ mod tests {
                     width: 2,
                     height: 2,
                 }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
             )
             .await
             .unwrap();
 
-        assert_eq!(result.width, 2);
-        assert_eq!(result.height, 2);
-        assert_eq!(
-            result.values,
-            vec![
-                Some(RasterValue(1.0)),
-                Some(RasterValue(2.0)),
-                Some(RasterValue(3.0)),
-                Some(RasterValue(4.0)),
-            ]
-        );
+        assert_eq!(result.width(), 2);
+        assert_eq!(result.height(), 2);
+        assert_eq!(result.band(1).unwrap().data(), &[1.0, 2.0, 3.0, 4.0]);
     }
 
     #[tokio::test]
@@ -991,31 +1153,34 @@ mod tests {
             should_fail: false,
         };
 
-        let left_raster_read_window = RasterReadWindow::new(
+        let left_raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(3, 5),
             RasterSize::new(1, 3),
             RasterSize::new(1, 3),
+            vec![1],
         );
 
-        let right_raster_read_window = RasterReadWindow::new(
+        let right_raster_read_query = RasterReadQuery::new(
             WindowPlacement::new(0, 2),
             RasterSize::new(1, 2),
             RasterSize::new(2, 3),
+            vec![1],
         );
 
         let raster = FakeRasterReader {
             responses: vec![
                 FakeRasterReaderData {
                     artifact_path: "left.tif".to_string(),
-                    window: left_raster_read_window,
-                    result: window_data(left_raster_read_window, vec![10.0, 10.0, 10.0]),
+                    window: left_raster_read_query,
+                    result: grid(1, 3, vec![RasterBand::new(1, vec![10.0, 10.0, 10.0])]),
                 },
                 FakeRasterReaderData {
                     artifact_path: "right.tif".to_string(),
-                    window: right_raster_read_window,
-                    result: window_data(
-                        right_raster_read_window,
-                        vec![20.0, 20.0, 20.0, 20.0, 20.0, 20.0],
+                    window: right_raster_read_query,
+                    result: grid(
+                        2,
+                        3,
+                        vec![RasterBand::new(1, vec![20.0, 20.0, 20.0, 20.0, 20.0, 20.0])],
                     ),
                 },
             ],
@@ -1031,19 +1196,17 @@ mod tests {
                     x_resolution: 1.0,
                     y_resolution: 1.0,
                 }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
             )
             .await
             .unwrap();
 
-        assert_eq!(result.width, 3);
-        assert_eq!(result.height, 3);
+        assert_eq!(result.width(), 3);
+        assert_eq!(result.height(), 3);
         assert_eq!(
-            result
-                .values
-                .iter()
-                .map(|el| el.unwrap().0)
-                .collect::<Vec<f64>>(),
-            vec![10.0, 20.0, 20.0, 10.0, 20.0, 20.0, 10.0, 20.0, 20.0]
+            result.band(1).unwrap().data(),
+            &[10.0, 20.0, 20.0, 10.0, 20.0, 20.0, 10.0, 20.0, 20.0]
         );
     }
 }

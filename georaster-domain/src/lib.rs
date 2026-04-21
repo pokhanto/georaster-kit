@@ -4,12 +4,13 @@
 //! storage traits, and small spatial primitives.
 
 mod metadata;
-pub use metadata::{BlockSize, DatasetMetadata, GeoTransform, RasterMetadata};
+pub use metadata::{BlockSize, DatasetMetadata, GeoTransform, RasterBandMetadata, RasterMetadata};
 
 mod raster;
 pub use raster::{
-    BboxRasterValues, RasterReadWindow, RasterReader, RasterReaderError, RasterSize, RasterValue,
-    RasterWindowData, RasterWindowDataError, WindowPlacement,
+    BandSelection, RasterBand, RasterGrid, RasterGridError, RasterPoint, RasterPointBand,
+    RasterReadQuery, RasterReader, RasterReaderError, RasterRepresentation, RasterSize,
+    WindowPlacement,
 };
 
 mod spatial;

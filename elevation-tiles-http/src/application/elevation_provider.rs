@@ -4,7 +4,7 @@
 //! other providers like fakes or mocks.
 use georaster_adapters::{FsArtifactResolver, FsMetadataStorage, GdalRasterReader};
 use georaster_core::{GeorasterSampling, GeorasterService, GeorasterServiceError};
-use georaster_domain::{BboxRasterValues, Bounds};
+use georaster_domain::{Bounds, RasterGrid, RasterRepresentation};
 
 /// Error returned by [`ElevationProvider`].
 ///
@@ -26,7 +26,7 @@ pub trait ElevationProvider {
         &self,
         bbox: Bounds,
         sampling: Option<GeorasterSampling>,
-    ) -> impl Future<Output = Result<BboxRasterValues, ElevationProviderError>> + Send;
+    ) -> impl Future<Output = Result<RasterGrid, ElevationProviderError>> + Send;
 }
 
 /// Production [`ElevationProvider`] implementation backed by
@@ -38,8 +38,15 @@ impl ElevationProvider
         &self,
         bbox: Bounds,
         sampling: Option<GeorasterSampling>,
-    ) -> Result<BboxRasterValues, ElevationProviderError> {
-        let elevations = GeorasterService::raster_data_in_bbox(self, bbox, sampling).await?;
+    ) -> Result<RasterGrid, ElevationProviderError> {
+        let elevations = GeorasterService::raster_data_in_bbox(
+            self,
+            bbox,
+            sampling,
+            georaster_domain::BandSelection::First,
+            RasterRepresentation::Grayscale,
+        )
+        .await?;
         Ok(elevations)
     }
 }

@@ -1,31 +1,31 @@
-// This benchmark measures elevation service dataset merge performance
-
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use georaster_core::{GeorasterSampling, GeorasterService};
 use georaster_domain::{
-    ArtifactLocator, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform, MetadataStorage,
-    MetadataStorageError, RasterMetadata, RasterReadWindow, RasterReader, RasterReaderError,
-    RasterWindowData,
+    ArtifactLocator, BandSelection, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform,
+    MetadataStorage, MetadataStorageError, RasterBand, RasterBandMetadata, RasterGrid,
+    RasterMetadata, RasterReadQuery, RasterReader, RasterReaderError, RasterRepresentation,
 };
 use tokio::runtime::Runtime;
 
-fn bench_elevations_in_bbox(c: &mut Criterion) {
+fn bench_raster_data_in_bbox(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
+
     // bounds to request, changing will affect result
     let bbox = Bounds::try_new(30.0, 50.0, 30.3, 50.3).unwrap();
-    // resolution hint to request, changing will affect result
+
+    // sampling to request, changing will affect result
     let sampling = GeorasterSampling::Resolution {
         x_resolution: 0.0005,
         y_resolution: 0.0005,
     };
 
     let total_datasets = 60;
-    // how many datasets service needs to merge to get elevations in bbox
+    // how many datasets service needs to merge to get raster data in bbox
     let overlapping_datasets_count = [1, 3, 5, 10, 20, 50];
 
-    let mut group = c.benchmark_group("elevations_in_bbox_overlap");
+    let mut group = c.benchmark_group("raster_data_in_bbox_overlap");
 
     for overlapping_datasets in overlapping_datasets_count {
         let datasets = make_datasets(total_datasets, overlapping_datasets, bbox);
@@ -43,7 +43,12 @@ fn bench_elevations_in_bbox(c: &mut Criterion) {
                 b.iter(|| {
                     let result = runtime.block_on(async {
                         service
-                            .raster_data_in_bbox(bbox, Some(sampling))
+                            .raster_data_in_bbox(
+                                bbox,
+                                Some(sampling),
+                                BandSelection::First,
+                                RasterRepresentation::Grayscale,
+                            )
                             .await
                             .unwrap()
                     });
@@ -57,10 +62,11 @@ fn bench_elevations_in_bbox(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_elevations_in_bbox);
+criterion_group!(benches, bench_raster_data_in_bbox);
 criterion_main!(benches);
 
-// Fake in memory implementations
+// Fake in-memory implementations
+
 #[derive(Debug, Clone)]
 struct InMemoryMetadataStorage {
     datasets: Vec<DatasetMetadata>,
@@ -85,12 +91,12 @@ impl MetadataStorage for InMemoryMetadataStorage {
 #[derive(Debug, Clone, Default)]
 struct FakeRasterReader;
 
-impl RasterReader<f64> for FakeRasterReader {
+impl RasterReader for FakeRasterReader {
     async fn read_window(
         &self,
         locator: &ArtifactLocator,
-        raster_window: RasterReadWindow,
-    ) -> Result<RasterWindowData<f64>, RasterReaderError> {
+        raster_query: RasterReadQuery,
+    ) -> Result<RasterGrid, RasterReaderError> {
         let fill_value = if locator.as_ref().contains("high") {
             100.0
         } else if locator.as_ref().contains("mid") {
@@ -99,11 +105,17 @@ impl RasterReader<f64> for FakeRasterReader {
             10.0
         };
 
-        let target_size = raster_window.target_size();
+        let target_size = raster_query.target_size();
         let len = target_size.width() * target_size.height();
-        let values = vec![fill_value; len];
 
-        RasterWindowData::try_new(raster_window, values).map_err(|_| RasterReaderError::Read)
+        let bands = raster_query
+            .bands()
+            .iter()
+            .map(|band_index| RasterBand::new(*band_index, vec![fill_value; len]))
+            .collect::<Vec<_>>();
+
+        RasterGrid::try_new(target_size.width(), target_size.height(), bands)
+            .map_err(|_| RasterReaderError::Read)
     }
 }
 
@@ -175,12 +187,17 @@ fn fake_dataset(
                 pixel_height: -pixel_size,
             },
             bounds,
-            nodata: None,
-            block_size: BlockSize {
-                width: 256,
-                height: 256,
-            },
             overview_count: 0,
+            raster_representation: RasterRepresentation::Grayscale,
+            bands: vec![RasterBandMetadata {
+                band_index: 1,
+                nodata: None,
+                block_size: BlockSize {
+                    width: 256,
+                    height: 256,
+                },
+                color_interpretation: "Gray".to_string(),
+            }],
         },
     }
 }
