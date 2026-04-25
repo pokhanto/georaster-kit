@@ -15,12 +15,12 @@ async fn ingest_stores_artifact_and_metadata_for_raster_fixture() {
     let target_crs = Crs::new("EPSG:4326".to_string());
 
     let artifact_storage = FsArtifactStorage::new(base_dir.clone());
-    let metadata_storage = FsMetadataStorage::new(base_dir.clone(), metadata_registry_name.into());
+    let metadata_storage = FsMetadataStorage::new(base_dir.clone(), metadata_registry_name);
     let service = IngestService::new(target_crs.clone(), artifact_storage, metadata_storage);
 
     service.run(dataset_id.clone(), source_path).await.unwrap();
 
-    let metadata_storage = FsMetadataStorage::new(base_dir, metadata_registry_name.into());
+    let metadata_storage = FsMetadataStorage::new(base_dir, metadata_registry_name);
 
     let mut metadata = metadata_storage.load_metadata().await.unwrap();
     let metadata = metadata.remove(0);

@@ -14,8 +14,10 @@ pub struct FsArtifactStorage {
 
 impl FsArtifactStorage {
     /// Creates filesystem artifact storage rooted at `base_dir`.
-    pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+        }
     }
 }
 

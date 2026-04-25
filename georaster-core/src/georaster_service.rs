@@ -410,10 +410,10 @@ where
                             continue;
                         }
 
-                        // later datasets overwrite earlier ones;
-                        // because we sorted from lower quality to higher quality,
-                        // higher quality data wins
-                        target_band_values[target_idx] = Some(value);
+                        // lower quality datasets only fill gaps left by higher quality data
+                        if target_band_values[target_idx].is_none() {
+                            target_band_values[target_idx] = Some(value);
+                        }
                     }
                 }
             }
@@ -1207,6 +1207,145 @@ mod tests {
         assert_eq!(
             result.band(1).unwrap().data(),
             &[10.0, 20.0, 20.0, 10.0, 20.0, 20.0, 10.0, 20.0, 20.0]
+        );
+    }
+
+    #[tokio::test]
+    async fn raster_data_in_bbox_prefers_higher_quality_data_on_overlap() {
+        let requested_bbox = bbox(0.0, 0.0, 2.0, 2.0);
+
+        let high_quality = dataset("high", "high.tif", requested_bbox, 0.5, -0.5, None);
+
+        let low_quality = dataset("low", "low.tif", requested_bbox, 1.0, -1.0, None);
+
+        let metadata = FakeMetadataStorage {
+            datasets: vec![low_quality, high_quality],
+            should_fail: false,
+        };
+
+        let high_query = RasterReadQuery::new(
+            WindowPlacement::new(0, 0),
+            RasterSize::new(4, 4),
+            RasterSize::new(2, 2),
+            vec![1],
+        );
+
+        let low_query = RasterReadQuery::new(
+            WindowPlacement::new(0, 0),
+            RasterSize::new(2, 2),
+            RasterSize::new(2, 2),
+            vec![1],
+        );
+
+        let raster = FakeRasterReader {
+            responses: vec![
+                FakeRasterReaderData {
+                    artifact_path: "high.tif".to_string(),
+                    window: high_query,
+                    result: grid(2, 2, vec![RasterBand::new(1, vec![20.0, 20.0, 20.0, 20.0])]),
+                },
+                FakeRasterReaderData {
+                    artifact_path: "low.tif".to_string(),
+                    window: low_query,
+                    result: grid(2, 2, vec![RasterBand::new(1, vec![10.0, 10.0, 10.0, 10.0])]),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let service = GeorasterService::new(metadata, raster);
+
+        let result = service
+            .raster_data_in_bbox(
+                requested_bbox,
+                Some(GeorasterSampling::OutputSize {
+                    width: 2,
+                    height: 2,
+                }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.band(1).unwrap().data(), &[20.0, 20.0, 20.0, 20.0]);
+    }
+
+    #[tokio::test]
+    async fn raster_data_in_bbox_lower_quality_fills_only_gaps_left_by_higher_quality() {
+        let requested_bbox = bbox(0.0, 0.0, 4.0, 2.0);
+
+        let high_quality = dataset(
+            "high",
+            "high.tif",
+            bbox(0.0, 0.0, 2.0, 2.0),
+            0.5,
+            -0.5,
+            None,
+        );
+
+        let low_quality = dataset("low", "low.tif", requested_bbox, 1.0, -1.0, None);
+
+        let metadata = FakeMetadataStorage {
+            datasets: vec![low_quality, high_quality],
+            should_fail: false,
+        };
+
+        let high_query = RasterReadQuery::new(
+            WindowPlacement::new(0, 0),
+            RasterSize::new(4, 4),
+            RasterSize::new(2, 2),
+            vec![1],
+        );
+
+        let low_query = RasterReadQuery::new(
+            WindowPlacement::new(0, 0),
+            RasterSize::new(4, 2),
+            RasterSize::new(4, 2),
+            vec![1],
+        );
+
+        let raster = FakeRasterReader {
+            responses: vec![
+                FakeRasterReaderData {
+                    artifact_path: "high.tif".to_string(),
+                    window: high_query,
+                    result: grid(2, 2, vec![RasterBand::new(1, vec![20.0, 20.0, 20.0, 20.0])]),
+                },
+                FakeRasterReaderData {
+                    artifact_path: "low.tif".to_string(),
+                    window: low_query,
+                    result: grid(
+                        4,
+                        2,
+                        vec![RasterBand::new(
+                            1,
+                            vec![10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+                        )],
+                    ),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let service = GeorasterService::new(metadata, raster);
+
+        let result = service
+            .raster_data_in_bbox(
+                requested_bbox,
+                Some(GeorasterSampling::OutputSize {
+                    width: 4,
+                    height: 2,
+                }),
+                BandSelection::First,
+                RasterRepresentation::Grayscale,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.band(1).unwrap().data(),
+            &[20.0, 20.0, 10.0, 10.0, 20.0, 20.0, 10.0, 10.0]
         );
     }
 }

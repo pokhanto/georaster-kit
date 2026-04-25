@@ -18,10 +18,10 @@ pub struct FsMetadataStorage {
 
 impl FsMetadataStorage {
     /// Creates filesystem metadata storage rooted at `base_dir`.
-    pub fn new(base_dir: PathBuf, registry_name: String) -> Self {
+    pub fn new(base_dir: impl Into<PathBuf>, registry_name: impl Into<String>) -> Self {
         Self {
-            base_dir,
-            registry_name,
+            base_dir: base_dir.into(),
+            registry_name: registry_name.into(),
         }
     }
 }

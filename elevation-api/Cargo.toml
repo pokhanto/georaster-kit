@@ -1,0 +1,23 @@
+[package]
+name = "elevation-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+georaster-adapters = { path = "../georaster-adapters" }
+georaster-domain = { path = "../georaster-domain" }
+georaster-core = { path = "../georaster-core" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+serde = { workspace = true }
+serde_json = "1.0.149"
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { version = "0.8.8" }
+tower-http = { version = "0.6.8", features = ["trace", "cors"] }
+dotenvy = "0.15.7"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+reqwest = "0.13.2"
+uuid = { version = "1.23.1", features = ["v4"] }

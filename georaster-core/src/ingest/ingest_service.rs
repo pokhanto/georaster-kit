@@ -6,8 +6,8 @@
 
 use gdal::{Dataset, Metadata};
 use georaster_domain::{
-    ArtifactStorage, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform, MetadataStorage,
-    RasterBandMetadata, RasterMetadata, RasterRepresentation,
+    ArtifactStorage, ArtifactStorageError, BlockSize, Bounds, Crs, DatasetMetadata, GeoTransform,
+    MetadataStorage, RasterBandMetadata, RasterMetadata, RasterRepresentation,
 };
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -34,6 +34,9 @@ pub enum IngestServiceError {
 
     #[error("Failed to create temporary workspace.")]
     TempWorkspace,
+
+    #[error("Dataset already exists")]
+    DuplicatedId,
 }
 
 pub struct IngestService<A, M> {
@@ -58,22 +61,24 @@ where
     M: MetadataStorage,
 {
     #[tracing::instrument(
-    skip(self),
+    skip(self, dataset_id),
     fields(
         crs = %self.crs,
-        dataset_id = %dataset_id,
         source_path = %source_path.display(),
     )
 )]
     pub async fn run(
-        self,
-        dataset_id: String,
+        &self,
+        dataset_id: impl Into<String>,
         source_path: PathBuf,
     ) -> Result<(), IngestServiceError> {
         tracing::info!("starting ingest");
 
+        let dataset_id: String = dataset_id.into();
+
+        tracing::Span::current().record("dataset_id", tracing::field::display(&dataset_id));
         let temp_dir = TempDir::new().map_err(|err| {
-            tracing::error!(error = %err, "failed to create temp workspace");
+            tracing::debug!(error = %err, "failed to create temp workspace");
             IngestServiceError::TempWorkspace
         })?;
 
@@ -95,7 +100,7 @@ where
             gdal_processor
                 .reproject_to_path(&current_path, self.crs.as_ref(), &reprojected_path)
                 .map_err(|err| {
-                    tracing::error!(
+                    tracing::debug!(
                         error = %err,
                         path = %current_path.display(),
                         crs_from = %source_crs,
@@ -118,7 +123,7 @@ where
             gdal_processor
                 .translate_to_cog_path(&current_path, &translated_path)
                 .map_err(|err| {
-                    tracing::error!(
+                    tracing::debug!(
                         error = %err,
                         path = %current_path.display(),
                         "failed to translate raster to COG"
@@ -134,17 +139,21 @@ where
             .save_artifact(&dataset_id, current_path.as_path())
             .await
             .map_err(|err| {
-                tracing::error!(
+                tracing::debug!(
                     error = %err,
                     path = %current_path.display(),
                     "failed to save artifact"
                 );
-                IngestServiceError::ArtifactStorage
+                if err == ArtifactStorageError::DuplicateId {
+                    IngestServiceError::DuplicatedId
+                } else {
+                    IngestServiceError::ArtifactStorage
+                }
             })?;
         tracing::info!(artifact_path = %artifact_path, "artifact stored");
 
         let raster_metadata = read_raster_metadata(&current_path).map_err(|err| {
-            tracing::error!(
+            tracing::debug!(
                 error = %err,
                 path = %current_path.display(),
                 "failed to extract raster metadata"
@@ -162,7 +171,7 @@ where
             .save_metadata(metadata)
             .await
             .map_err(|err| {
-                tracing::error!(error = %err, "failed to save metadata");
+                tracing::debug!(error = %err, "failed to save metadata");
                 IngestServiceError::MetadataStorage
             })?;
         tracing::info!("metadata stored");
@@ -175,7 +184,7 @@ where
 /// Opens GDAL dataset from disk.
 fn open_dataset(path: &Path) -> Result<Dataset, IngestServiceError> {
     Dataset::open(path).map_err(|err| {
-        tracing::error!(error = %err, path = %path.display(), "failed to open raster dataset");
+        tracing::debug!(error = %err, path = %path.display(), "failed to open raster dataset");
         IngestServiceError::MetadataExtraction
     })
 }
@@ -198,7 +207,7 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestService
     tracing::debug!(format, "dataset format extracted");
 
     let geo_transform = dataset.geo_transform().map_err(|err| {
-        tracing::error!(error = %err, "failed to get geotransform");
+        tracing::debug!(error = %err, "failed to get geotransform");
         IngestServiceError::MetadataExtraction
     })?;
     tracing::debug!(?geo_transform, "geotransform extracted");
@@ -209,7 +218,7 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestService
     let bands = (1..=band_count)
         .map(|band_index| {
             let band = dataset.rasterband(band_index).map_err(|err| {
-                tracing::error!(error = %err, band_index, "failed to get raster band");
+                tracing::debug!(error = %err, band_index, "failed to get raster band");
                 IngestServiceError::MetadataExtraction
             })?;
 
@@ -263,7 +272,7 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestService
     ] = geo_transform;
 
     if rot_x != 0.0 || rot_y != 0.0 {
-        tracing::error!(
+        tracing::debug!(
             rot_x,
             rot_y,
             "rotated/skewed rasters are not supported by this metadata extraction path"
@@ -282,7 +291,7 @@ pub fn read_raster_metadata(path: &Path) -> Result<RasterMetadata, IngestService
     let max_lat = lat_1.max(lat_2);
 
     let bounds = Bounds::try_new(min_lon, min_lat, max_lon, max_lat).map_err(|err| {
-        tracing::error!(
+        tracing::debug!(
             error = %err,
             min_lon,
             min_lat,
@@ -345,7 +354,7 @@ fn get_crs(dataset: &Dataset) -> Result<Crs, IngestServiceError> {
         .spatial_ref()
         .and_then(|spatial_ref| spatial_ref.authority())
         .map_err(|err| {
-            tracing::error!(error = %err, "failed to get spatial authority");
+            tracing::debug!(error = %err, "failed to get spatial authority");
             IngestServiceError::MetadataExtraction
         })?;
 
